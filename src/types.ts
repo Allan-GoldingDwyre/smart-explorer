@@ -7,6 +7,20 @@ export interface WorkspaceEntry {
   type: WorkspaceType;
   ref: string;
   instructions?: string[];
+  // Arbre virtuel fourni par l'agent (virtual folders). S'il est présent,
+  // il est affiché à la place de l'arbre physique du projet.
+  tree?: FileTreeNode[];
+}
+
+export type FileTreeNodeType = 'file' | 'folder' | 'virtualFolder';
+
+export interface FileTreeNode {
+  name: string;
+  // Chemin relatif depuis la racine du projet (les virtual folders
+  // regroupent des fichiers venant de dossiers différents).
+  path: string;
+  type: FileTreeNodeType;
+  children?: FileTreeNode[];
 }
 
 export interface TypePickItem extends vscode.QuickPickItem {

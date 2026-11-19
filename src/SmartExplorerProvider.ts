@@ -2,22 +2,25 @@ import * as vscode from 'vscode';
 import { getLinearToken } from './auth';
 import { fetchRefTitle } from './refs';
 import { SmartExplorerNode } from './SmartExplorerNode';
-import { TYPE_ICONS, WorkspaceEntry, truncate } from './types';
+import { FileTreeNode, TYPE_ICONS, WorkspaceEntry, truncate } from './types';
 import { runAddWorkspaceFlow } from './workspaceForm';
 
 const WORKSPACES_KEY = 'smartExplorer.workspaces';
+const IGNORED_DIRS = new Set(['node_modules', '.git', 'out', 'dist']);
 
 export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplorerNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<SmartExplorerNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private workspaces: WorkspaceEntry[];
+  private fileTreeCache = new Map<string, FileTreeNode[]>();
 
   constructor(private context: vscode.ExtensionContext) {
     this.workspaces = context.workspaceState.get<WorkspaceEntry[]>(WORKSPACES_KEY, []);
   }
 
   refresh(): void {
+    this.fileTreeCache.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -114,9 +117,19 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
   }
 
   async getChildren(element?: SmartExplorerNode): Promise<SmartExplorerNode[]> {
-    if (element || this.workspaces.length === 0) {
-      return [];
+    if (!element) {
+      return this.getRootChildren();
     }
+    if (element.entry) {
+      return this.getWorkspaceChildren(element.entry);
+    }
+    if (element.fileNode) {
+      return (element.fileNode.children ?? []).map((n) => this.toFileNode(n));
+    }
+    return [];
+  }
+
+  private async getRootChildren(): Promise<SmartExplorerNode[]> {
     const nodes: SmartExplorerNode[] = [];
     if (!(await getLinearToken(this.context))) {
       nodes.push(
@@ -130,7 +143,7 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     nodes.push(
       ...this.workspaces.map(
         (w) =>
-          new SmartExplorerNode(w.name, vscode.TreeItemCollapsibleState.None, {
+          new SmartExplorerNode(w.name, vscode.TreeItemCollapsibleState.Collapsed, {
             contextValue: `workspace-${w.type}`,
             iconId: TYPE_ICONS[w.type],
             description: truncate(w.ref),
@@ -138,6 +151,69 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
             entry: w
           })
       )
+    );
+    return nodes;
+  }
+
+  // Enfants d'un workspace : l'arbre virtuel de l'agent s'il existe,
+  // sinon l'arbre physique du projet.
+  private async getWorkspaceChildren(entry: WorkspaceEntry): Promise<SmartExplorerNode[]> {
+    const tree = entry.tree ?? (await this.buildProjectTree());
+    return tree.map((n) => this.toFileNode(n));
+  }
+
+  private toFileNode(n: FileTreeNode): SmartExplorerNode {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    const abs = root ? vscode.Uri.joinPath(root, n.path) : vscode.Uri.parse(n.path);
+    const isFolder = n.type !== 'file';
+    return new SmartExplorerNode(n.name, isFolder ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None, {
+      contextValue: isFolder ? 'folder' : 'file',
+      resourceUri: abs,
+      fileNode: n,
+      command: isFolder ? undefined : { command: 'vscode.open', title: 'Open', arguments: [abs] }
+    });
+  }
+
+  private async buildProjectTree(): Promise<FileTreeNode[]> {
+    const root = vscode.workspace.workspaceFolders?.[0];
+    if (!root) {
+      return [];
+    }
+    const cached = this.fileTreeCache.get(root.uri.fsPath);
+    if (cached) {
+      return cached;
+    }
+    const tree = await this.readDir(root.uri, '');
+    this.fileTreeCache.set(root.uri.fsPath, tree);
+    return tree;
+  }
+
+  private async readDir(dirUri: vscode.Uri, rel: string): Promise<FileTreeNode[]> {
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(dirUri);
+    } catch {
+      return [];
+    }
+    const nodes: FileTreeNode[] = [];
+    for (const [name, type] of entries) {
+      if (type === vscode.FileType.Directory && IGNORED_DIRS.has(name)) {
+        continue;
+      }
+      const childRel = rel ? `${rel}/${name}` : name;
+      if (type === vscode.FileType.Directory) {
+        nodes.push({
+          name,
+          path: childRel,
+          type: 'folder',
+          children: await this.readDir(vscode.Uri.joinPath(dirUri, name), childRel)
+        });
+      } else {
+        nodes.push({ name, path: childRel, type: 'file' });
+      }
+    }
+    nodes.sort((a, b) =>
+      a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'folder' || a.type === 'virtualFolder' ? -1 : 1
     );
     return nodes;
   }
