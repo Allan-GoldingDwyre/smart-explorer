@@ -1,0 +1,100 @@
+{
+  "name": "smart-explorer",
+  "displayName": "Smart Explorer",
+  "description": "A smarter file explorer panel for VS Code",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "smart-explorer",
+          "title": "Smart Explorer",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "smart-explorer": [
+        {
+          "id": "smartExplorerView",
+          "name": "Smart Explorer",
+          "contextualTitle": "Smart Explorer"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "smartExplorerView",
+        "contents": "No workspace in this project yet.\n\n[Add Workspace](command:smartExplorer.addWorkspace)"
+      }
+    ],
+
+    "commands": [
+      {
+        "command": "smartExplorer.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "smartExplorer.addWorkspace",
+        "title": "Add Workspace",
+        "icon": "$(add)"
+      },
+      {
+        "command": "smartExplorer.setupLinear",
+        "title": "Smart Explorer: Setup Linear API Key"
+      },
+      {
+        "command": "smartExplorer.logoutLinear",
+        "title": "Smart Explorer: Logout from Linear"
+      }
+    ],
+    "configuration": {
+      "title": "Smart Explorer",
+      "properties": {
+        "smartExplorer.configureLinearKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "[Configurer la clé API Linear](command:smartExplorer.setupLinear)\n\nClique sur le lien ci-dessus : une boîte de dialogue sécurisée s'ouvre et la clé est stockée **chiffrée** (SecretStorage). Ne saisis jamais ta clé dans ce champ — elle ne doit pas être écrite en clair dans les settings.",
+          "order": 1
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "smartExplorer.addWorkspace",
+          "when": "view == smartExplorerView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "smartExplorer.refresh",
+          "when": "view == smartExplorerView",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.x",
+    "typescript": "^5.3.0",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0"
+  }
+}
