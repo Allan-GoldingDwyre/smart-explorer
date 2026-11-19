@@ -11,6 +11,10 @@
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owner/smart-explorer.git"
+  },
   "bin": {
     "smart-explorer-mcp": "./out/mcpStdio.js"
   },
@@ -141,13 +145,17 @@
     "compile:test": "tsc -p tsconfig.test.json",
     "test": "npm run compile:test && node --test out-test/test/",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "build:mcp": "esbuild src/mcpStdio.ts --bundle --platform=node --target=node18 --outfile=dist/smart-explorer-mcp.js && chmod +x dist/smart-explorer-mcp.js",
+    "package": "npm run compile && npx vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.x",
     "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
     "eslint": "^8.55.0",
     "prettier": "^3.1.0",
     "typescript": "^5.3.0"

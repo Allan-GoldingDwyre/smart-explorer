@@ -1,0 +1,41 @@
+# Release : sur chaque tag v*.*.*, publie une GitHub Release avec :
+#   - smart-explorer-<version>.vsix  (extension VS Code)
+#   - smart-explorer-mcp.js           (serveur MCP stdio autonome, macOS/Linux)
+#   - install.sh                      (script d'installation curl|bash)
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run compile
+      - run: npm run build:mcp
+      - run: npx vsce package
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "smart-explorer $VERSION" \
+            --notes "Extension VS Code (vsix) + serveur MCP stdio autonome (smart-explorer-mcp.js). Installation : curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash" \
+            "smart-explorer-${VERSION}.vsix" \
+            dist/smart-explorer-mcp.js \
+            install.sh

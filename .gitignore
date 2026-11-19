@@ -5,3 +5,4 @@ out/
 out-test/
 test/*.js
 test/*.js.map
+dist/

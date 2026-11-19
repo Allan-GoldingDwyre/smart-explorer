@@ -1,5 +1,7 @@
 .vscode-test
-out
+out-test
+dist
+test
 node_modules
 **/*.map
 **/*.ts

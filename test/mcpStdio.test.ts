@@ -8,6 +8,13 @@ import * as os from 'os';
 import * as path from 'path';
 
 const SERVER = path.join(__dirname, '..', '..', 'out', 'mcpStdio.js');
+const BUNDLE = path.join(
+  __dirname,
+  '..',
+  '..',
+  'dist',
+  'smart-explorer-mcp.js',
+);
 
 function makeTempRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-stdio-'));
@@ -21,13 +28,25 @@ interface Rpc {
   close(): void;
 }
 
-function spawnServer(root: string): Rpc {
-  const child = spawn(process.execPath, [SERVER, '--root', root], {
+function spawnServer(root: string, bin: string = SERVER): Rpc {
+  const child = spawn(process.execPath, [bin, '--root', root], {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let buffer = '';
   const pending = new Map<number, (v: any) => void>();
   let nextId = 1;
+  let stderrBuf = '';
+  child.stderr.on('data', (c) => {
+    stderrBuf += c.toString();
+  });
+  child.on('exit', (code) => {
+    for (const [, resolve] of pending) {
+      resolve({
+        error: { code: 'child-exit', exitCode: code, stderr: stderrBuf },
+      });
+    }
+    pending.clear();
+  });
   child.stdout.on('data', (chunk) => {
     buffer += chunk.toString();
     let idx: number;
@@ -141,3 +160,19 @@ test('serveur stdio : handshake + tools/list (11 tools) + tools/call', async () 
     rpc.close();
   }
 });
+
+test(
+  'bundle dist/smart-explorer-mcp.js : handshake + tools/list',
+  { skip: !fs.existsSync(BUNDLE) },
+  async () => {
+    const root = makeTempRoot();
+    const rpc = spawnServer(root, BUNDLE);
+    try {
+      await handshake(rpc);
+      const list = await rpc.send('tools/list');
+      assert.equal(list.result.tools.length, 11);
+    } finally {
+      rpc.close();
+    }
+  },
+);

@@ -11,6 +11,21 @@ A smarter file explorer panel for VS Code.
 - **MCP server hébergé par l'extension** (VS Code ≥ 1.99, `vscode.createMcpServer`, démarré à l'activation) : un agent MCP (Vibe, Claude Code, CLI Mistral) pilote les workspaces via 11 tools (`list_workspaces`, `create_workspace`, `fetch_source`, `build_tree`, `set_instructions`, `sync_workspace`, `apply_sync`, `check_workspace_files`, `export_context`, `reveal_file`, `set_active_workspace`). L'extension reste le rendering + registry.
 - **Serveur MCP stdio pour clients externes** (`out/mcpStdio.js`, mêmes 11 tools, logique partagée dans `mcpTools.ts`) : voir ci-dessous.
 
+## Installation sur une autre machine (macOS / Linux)
+
+Le serveur stdio est un **bundle autonome** (Node.js ≥ 18 seulement, aucun build) :
+
+```bash
+# via le script d'installation (dernière release GitHub)
+curl -fsSL https://raw.githubusercontent.com/<owner>/smart-explorer/main/install.sh | bash
+
+# ou à la main depuis une release : télécharger smart-explorer-mcp.js
+# ou depuis les sources : npm ci && npm run build:mcp   # produit dist/smart-explorer-mcp.js
+```
+
+Chaque tag `v*.*.*` publie une GitHub Release (`.github/workflows/release.yml`) avec le
+`.vsix` de l'extension, le bundle `smart-explorer-mcp.js` et `install.sh`.
+
 ## Client externe (Vibe, Claude Code CLI, CLI Mistral)
 
 Le serveur in-process de VS Code n'est pas spawné par un client externe ; on passe par le binaire stdio :
@@ -33,6 +48,9 @@ Config client — `.mcp.json` à la racine du projet (lu par Claude Code, Vibe, 
 ```
 
 La racine du projet est résolue par ordre : `--root <path>`, variable `SMART_EXPLORER_ROOT`, sinon le répertoire courant du client. `set_active_workspace` écrit `.smart-explorer/active`, lu par l'extension VS Code (la vue bascule toute seule). `reveal_file` retourne le chemin absolu — c'est le client qui ouvre le fichier.
+
+Un **skill agent** documente l'utilisation (workflow create → fetch_source → build_tree → sync) :
+`.vibe/skills/smart-explorer/SKILL.md`.
 
 ## État partagé (YAML)
 
