@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getLinearToken } from './auth';
+import { fetchRefTitle } from './refs';
 import { SmartExplorerNode } from './SmartExplorerNode';
 import { TYPE_ICONS, WorkspaceEntry, truncate } from './types';
 import { runAddWorkspaceFlow } from './workspaceForm';
@@ -30,8 +31,82 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
       return;
     }
     this.workspaces.push(entry);
-    await this.context.workspaceState.update(WORKSPACES_KEY, this.workspaces);
+    await this.save();
     this.refresh();
+  }
+
+  async renameWorkspace(node: SmartExplorerNode | undefined): Promise<void> {
+    const entry = node?.entry;
+    if (!entry) {
+      return;
+    }
+    const name = await vscode.window.showInputBox({
+      title: 'Rename Workspace',
+      prompt: 'Nouveau nom du workspace',
+      value: entry.name
+    });
+    if (!name || name === entry.name) {
+      return;
+    }
+    entry.name = name;
+    await this.save();
+    this.refresh();
+  }
+
+  async deleteWorkspace(node: SmartExplorerNode): Promise<void> {
+    const entry = node.entry;
+    if (!entry) {
+      return;
+    }
+    const confirm = await vscode.window.showWarningMessage(
+      `Supprimer le workspace "${entry.name}" ?`,
+      { modal: true },
+      'Supprimer'
+    );
+    if (confirm !== 'Supprimer') {
+      return;
+    }
+    this.workspaces = this.workspaces.filter((w) => w !== entry);
+    await this.save();
+    this.refresh();
+  }
+
+  async addInstruction(node: SmartExplorerNode): Promise<void> {
+    const entry = node.entry;
+    if (!entry) {
+      return;
+    }
+    const instruction = await vscode.window.showInputBox({
+      title: 'Add Instruction',
+      prompt: `Instruction liée au workspace "${entry.name}"`,
+      placeHolder: 'Ex : se concentrer sur la logique métier, ignorer les tests...'
+    });
+    if (!instruction) {
+      return;
+    }
+    entry.instructions = [...(entry.instructions ?? []), instruction];
+    await this.save();
+    this.refresh();
+  }
+
+  // Relance la résolution du workspace (titre à jour via l'API) — le run de
+  // l'agent Mistral arrivera ici plus tard.
+  async refreshWorkspace(node: SmartExplorerNode): Promise<void> {
+    const entry = node.entry;
+    if (!entry) {
+      return;
+    }
+    const title = await fetchRefTitle(entry.type, entry.ref, this.context);
+    if (title && title !== entry.name) {
+      entry.name = truncate(title, 60);
+      await this.save();
+    }
+    this.refresh();
+    vscode.window.showInformationMessage(`Workspace "${entry.name}" rafraîchi.`);
+  }
+
+  private async save(): Promise<void> {
+    await this.context.workspaceState.update(WORKSPACES_KEY, this.workspaces);
   }
 
   getTreeItem(element: SmartExplorerNode): vscode.TreeItem {
@@ -59,7 +134,8 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
             contextValue: `workspace-${w.type}`,
             iconId: TYPE_ICONS[w.type],
             description: truncate(w.ref),
-            tooltip: `${w.type}: ${w.ref}`
+            tooltip: [`${w.type}: ${w.ref}`, ...(w.instructions ?? [])].join('\n'),
+            entry: w
           })
       )
     );

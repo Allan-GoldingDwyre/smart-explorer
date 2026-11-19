@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { WorkspaceEntry } from './types';
 
 export interface SmartExplorerNodeOptions {
   contextValue: string;
@@ -7,9 +8,12 @@ export interface SmartExplorerNodeOptions {
   description?: string;
   tooltip?: string;
   command?: vscode.Command;
+  entry?: WorkspaceEntry;
 }
 
 export class SmartExplorerNode extends vscode.TreeItem {
+  public readonly entry?: WorkspaceEntry;
+
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
@@ -21,5 +25,6 @@ export class SmartExplorerNode extends vscode.TreeItem {
     this.description = options.description;
     this.tooltip = options.tooltip;
     this.command = options.command;
+    this.entry = options.entry;
   }
 }

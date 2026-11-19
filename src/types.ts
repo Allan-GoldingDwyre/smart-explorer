@@ -6,6 +6,7 @@ export interface WorkspaceEntry {
   name: string;
   type: WorkspaceType;
   ref: string;
+  instructions?: string[];
 }
 
 export interface TypePickItem extends vscode.QuickPickItem {

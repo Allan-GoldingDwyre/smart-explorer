@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { loginGithub, logoutGithub, logoutLinear, setupLinear } from './auth';
+import { SmartExplorerNode } from './SmartExplorerNode';
 import { SmartExplorerProvider } from './SmartExplorerProvider';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -12,11 +13,20 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     treeView,
-    vscode.commands.registerCommand('smartExplorer.refresh', () => {
-      provider.refresh();
-    }),
     vscode.commands.registerCommand('smartExplorer.addWorkspace', () => {
       provider.addWorkspace();
+    }),
+    vscode.commands.registerCommand('smartExplorer.renameWorkspace', () => {
+      provider.renameWorkspace(treeView.selection[0] as SmartExplorerNode | undefined);
+    }),
+    vscode.commands.registerCommand('smartExplorer.deleteWorkspace', (node: SmartExplorerNode) => {
+      provider.deleteWorkspace(node);
+    }),
+    vscode.commands.registerCommand('smartExplorer.addInstruction', (node: SmartExplorerNode) => {
+      provider.addInstruction(node);
+    }),
+    vscode.commands.registerCommand('smartExplorer.refreshWorkspace', (node: SmartExplorerNode) => {
+      provider.refreshWorkspace(node);
     }),
     vscode.commands.registerCommand('smartExplorer.loginGithub', () => {
       loginGithub();
