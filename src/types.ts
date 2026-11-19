@@ -6,6 +6,8 @@ export interface WorkspaceEntry {
   name: string;
   type: WorkspaceType;
   ref: string;
+  // Id du store YAML quand le workspace y est persisté (shared state MCP).
+  id?: string;
   instructions?: string[];
   // Arbre virtuel fourni par l'agent (virtual folders). S'il est présent,
   // il est affiché à la place de l'arbre physique du projet.

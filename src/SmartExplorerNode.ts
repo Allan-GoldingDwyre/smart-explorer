@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { FileTreeNode, WorkspaceEntry } from './types';
+import { VirtualDir, WorkspaceFile } from './workspaceStore';
 
 export interface SmartExplorerNodeOptions {
   contextValue: string;
@@ -13,11 +14,17 @@ export interface SmartExplorerNodeOptions {
   command?: vscode.Command;
   entry?: WorkspaceEntry;
   fileNode?: FileTreeNode;
+  // Workspace du store YAML (créé via les tools MCP).
+  workspaceFile?: WorkspaceFile;
+  // Virtual dir de l'arbre de l'agent (rendu avec un codicon).
+  virtualDir?: VirtualDir;
 }
 
 export class SmartExplorerNode extends vscode.TreeItem {
   public readonly entry?: WorkspaceEntry;
   public readonly fileNode?: FileTreeNode;
+  public readonly workspaceFile?: WorkspaceFile;
+  public readonly virtualDir?: VirtualDir;
 
   constructor(
     public readonly label: string,
@@ -35,5 +42,7 @@ export class SmartExplorerNode extends vscode.TreeItem {
     this.command = options.command;
     this.entry = options.entry;
     this.fileNode = options.fileNode;
+    this.workspaceFile = options.workspaceFile;
+    this.virtualDir = options.virtualDir;
   }
 }

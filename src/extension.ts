@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { loginGithub, logoutGithub, logoutLinear, setupLinear } from './auth';
+import { startMcpServer } from './mcpServer';
 import { SmartExplorerNode } from './SmartExplorerNode';
 import { SmartExplorerProvider } from './SmartExplorerProvider';
 
@@ -10,9 +11,37 @@ export function activate(context: vscode.ExtensionContext) {
     treeDataProvider: provider,
     showCollapseAll: true,
   });
+  provider.setTreeView(treeView);
+
+  // Serveur MCP hébergé par l'extension (VS Code >= 1.99), démarré à
+  // l'activation. L'agent (client MCP) pilote les workspaces via les tools ;
+  // l'extension re-render la vue quand les YAML changent.
+  startMcpServer(context, {
+    revealFile: (relPath, where) => provider.revealFile(relPath, where),
+    setActiveWorkspace: (id) => provider.setActiveWorkspace(id),
+    getActiveWorkspace: () => provider.getActiveWorkspace(),
+  });
+
+  // Re-render quand un agent écrit/met à jour un YAML de workspace.
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    '**/.smart-explorer/**',
+  );
+  watcher.onDidChange(() => {
+    provider.reloadFromDisk();
+    provider.refresh();
+  });
+  watcher.onDidCreate(() => {
+    provider.reloadFromDisk();
+    provider.refresh();
+  });
+  watcher.onDidDelete(() => {
+    provider.reloadFromDisk();
+    provider.refresh();
+  });
 
   context.subscriptions.push(
     treeView,
+    watcher,
     vscode.commands.registerCommand('smartExplorer.addWorkspace', () => {
       provider.addWorkspace();
     }),
