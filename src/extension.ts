@@ -8,7 +8,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const treeView = vscode.window.createTreeView('smartExplorerView', {
     treeDataProvider: provider,
-    showCollapseAll: true
+    showCollapseAll: true,
   });
 
   context.subscriptions.push(
@@ -17,17 +17,34 @@ export function activate(context: vscode.ExtensionContext) {
       provider.addWorkspace();
     }),
     vscode.commands.registerCommand('smartExplorer.renameWorkspace', () => {
-      provider.renameWorkspace(treeView.selection[0] as SmartExplorerNode | undefined);
+      provider.renameWorkspace(
+        treeView.selection[0] as SmartExplorerNode | undefined,
+      );
     }),
-    vscode.commands.registerCommand('smartExplorer.deleteWorkspace', (node: SmartExplorerNode) => {
-      provider.deleteWorkspace(node);
-    }),
-    vscode.commands.registerCommand('smartExplorer.addInstruction', (node: SmartExplorerNode) => {
-      provider.addInstruction(node);
-    }),
-    vscode.commands.registerCommand('smartExplorer.refreshWorkspace', (node: SmartExplorerNode) => {
-      provider.refreshWorkspace(node);
-    }),
+    vscode.commands.registerCommand(
+      'smartExplorer.deleteWorkspace',
+      (node: SmartExplorerNode) => {
+        provider.deleteWorkspace(node);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'smartExplorer.addInstruction',
+      (node: SmartExplorerNode) => {
+        provider.addInstruction(node);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'smartExplorer.refreshWorkspace',
+      (node: SmartExplorerNode) => {
+        provider.refreshWorkspace(node);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'smartExplorer.revealInExplorer',
+      (node: SmartExplorerNode) => {
+        provider.revealInExplorer(node);
+      },
+    ),
     vscode.commands.registerCommand('smartExplorer.loginGithub', () => {
       loginGithub();
     }),
@@ -51,7 +68,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('smartExplorer.logoutLinear', async () => {
       await logoutLinear(context);
       provider.refresh();
-    })
+    }),
   );
 }
 

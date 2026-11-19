@@ -8,15 +8,22 @@ import { runAddWorkspaceFlow } from './workspaceForm';
 const WORKSPACES_KEY = 'smartExplorer.workspaces';
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'out', 'dist']);
 
-export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplorerNode> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<SmartExplorerNode | undefined>();
+export class SmartExplorerProvider
+  implements vscode.TreeDataProvider<SmartExplorerNode>
+{
+  private _onDidChangeTreeData = new vscode.EventEmitter<
+    SmartExplorerNode | undefined
+  >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private workspaces: WorkspaceEntry[];
   private fileTreeCache = new Map<string, FileTreeNode[]>();
 
   constructor(private context: vscode.ExtensionContext) {
-    this.workspaces = context.workspaceState.get<WorkspaceEntry[]>(WORKSPACES_KEY, []);
+    this.workspaces = context.workspaceState.get<WorkspaceEntry[]>(
+      WORKSPACES_KEY,
+      [],
+    );
   }
 
   refresh(): void {
@@ -29,8 +36,12 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     if (!entry) {
       return;
     }
-    if (this.workspaces.some((w) => w.type === entry.type && w.ref === entry.ref)) {
-      vscode.window.showWarningMessage(`Ce workspace existe déjà : ${entry.name} (${entry.ref})`);
+    if (
+      this.workspaces.some((w) => w.type === entry.type && w.ref === entry.ref)
+    ) {
+      vscode.window.showWarningMessage(
+        `Ce workspace existe déjà : ${entry.name} (${entry.ref})`,
+      );
       return;
     }
     this.workspaces.push(entry);
@@ -46,7 +57,7 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     const name = await vscode.window.showInputBox({
       title: 'Rename Workspace',
       prompt: 'Nouveau nom du workspace',
-      value: entry.name
+      value: entry.name,
     });
     if (!name || name === entry.name) {
       return;
@@ -64,7 +75,7 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     const confirm = await vscode.window.showWarningMessage(
       `Supprimer le workspace "${entry.name}" ?`,
       { modal: true },
-      'Supprimer'
+      'Supprimer',
     );
     if (confirm !== 'Supprimer') {
       return;
@@ -82,7 +93,8 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     const instruction = await vscode.window.showInputBox({
       title: 'Add Instruction',
       prompt: `Instruction liée au workspace "${entry.name}"`,
-      placeHolder: 'Ex : se concentrer sur la logique métier, ignorer les tests...'
+      placeHolder:
+        'Ex : se concentrer sur la logique métier, ignorer les tests...',
     });
     if (!instruction) {
       return;
@@ -105,7 +117,22 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
       await this.save();
     }
     this.refresh();
-    vscode.window.showInformationMessage(`Workspace "${entry.name}" rafraîchi.`);
+    vscode.window.showInformationMessage(
+      `Workspace "${entry.name}" rafraîchi.`,
+    );
+  }
+
+  // Révèle le fichier dans le vrai panel Explorer (sélectionné dans l'arbre).
+  async revealInExplorer(node: SmartExplorerNode): Promise<void> {
+    const file = node.fileNode;
+    if (!file || file.type !== 'file') {
+      return;
+    }
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    const uri = root
+      ? vscode.Uri.joinPath(root, file.path)
+      : vscode.Uri.file(file.path);
+    await vscode.commands.executeCommand('revealInExplorer', uri);
   }
 
   private async save(): Promise<void> {
@@ -133,45 +160,70 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     const nodes: SmartExplorerNode[] = [];
     if (!(await getLinearToken(this.context))) {
       nodes.push(
-        new SmartExplorerNode('Setup Linear', vscode.TreeItemCollapsibleState.None, {
-          contextValue: 'action-linear',
-          iconId: 'key',
-          command: { command: 'smartExplorer.setupLinear', title: 'Setup Linear' }
-        })
+        new SmartExplorerNode(
+          'Setup Linear',
+          vscode.TreeItemCollapsibleState.None,
+          {
+            contextValue: 'action-linear',
+            iconId: 'key',
+            command: {
+              command: 'smartExplorer.setupLinear',
+              title: 'Setup Linear',
+            },
+          },
+        ),
       );
     }
     nodes.push(
       ...this.workspaces.map(
         (w) =>
-          new SmartExplorerNode(w.name, vscode.TreeItemCollapsibleState.Collapsed, {
-            contextValue: `workspace-${w.type}`,
-            iconId: TYPE_ICONS[w.type],
-            description: truncate(w.ref),
-            tooltip: [`${w.type}: ${w.ref}`, ...(w.instructions ?? [])].join('\n'),
-            entry: w
-          })
-      )
+          new SmartExplorerNode(
+            w.name,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            {
+              contextValue: `workspace-${w.type}`,
+              iconId: TYPE_ICONS[w.type],
+              description: truncate(w.ref),
+              tooltip: [`${w.type}: ${w.ref}`, ...(w.instructions ?? [])].join(
+                '\n',
+              ),
+              entry: w,
+            },
+          ),
+      ),
     );
     return nodes;
   }
 
   // Enfants d'un workspace : l'arbre virtuel de l'agent s'il existe,
   // sinon l'arbre physique du projet.
-  private async getWorkspaceChildren(entry: WorkspaceEntry): Promise<SmartExplorerNode[]> {
+  private async getWorkspaceChildren(
+    entry: WorkspaceEntry,
+  ): Promise<SmartExplorerNode[]> {
     const tree = entry.tree ?? (await this.buildProjectTree());
     return tree.map((n) => this.toFileNode(n));
   }
 
   private toFileNode(n: FileTreeNode): SmartExplorerNode {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-    const abs = root ? vscode.Uri.joinPath(root, n.path) : vscode.Uri.parse(n.path);
+    const abs = root
+      ? vscode.Uri.joinPath(root, n.path)
+      : vscode.Uri.parse(n.path);
     const isFolder = n.type !== 'file';
-    return new SmartExplorerNode(n.name, isFolder ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None, {
-      contextValue: isFolder ? 'folder' : 'file',
-      resourceUri: abs,
-      fileNode: n,
-      command: isFolder ? undefined : { command: 'vscode.open', title: 'Open', arguments: [abs] }
-    });
+    return new SmartExplorerNode(
+      n.name,
+      isFolder
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
+      {
+        contextValue: isFolder ? 'folder' : 'file',
+        resourceUri: abs,
+        fileNode: n,
+        command: isFolder
+          ? undefined
+          : { command: 'vscode.open', title: 'Open', arguments: [abs] },
+      },
+    );
   }
 
   private async buildProjectTree(): Promise<FileTreeNode[]> {
@@ -188,7 +240,10 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
     return tree;
   }
 
-  private async readDir(dirUri: vscode.Uri, rel: string): Promise<FileTreeNode[]> {
+  private async readDir(
+    dirUri: vscode.Uri,
+    rel: string,
+  ): Promise<FileTreeNode[]> {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(dirUri);
@@ -206,14 +261,21 @@ export class SmartExplorerProvider implements vscode.TreeDataProvider<SmartExplo
           name,
           path: childRel,
           type: 'folder',
-          children: await this.readDir(vscode.Uri.joinPath(dirUri, name), childRel)
+          children: await this.readDir(
+            vscode.Uri.joinPath(dirUri, name),
+            childRel,
+          ),
         });
       } else {
         nodes.push({ name, path: childRel, type: 'file' });
       }
     }
     nodes.sort((a, b) =>
-      a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'folder' || a.type === 'virtualFolder' ? -1 : 1
+      a.type === b.type
+        ? a.name.localeCompare(b.name)
+        : a.type === 'folder' || a.type === 'virtualFolder'
+          ? -1
+          : 1,
     );
     return nodes;
   }

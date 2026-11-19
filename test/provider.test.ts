@@ -7,6 +7,7 @@ import { FileTreeNode, WorkspaceEntry } from '../src/types';
 import {
   fakeFs,
   inputQueue,
+  executedCommands,
   makeContext,
   quickPickQueue,
   resetMock,
@@ -193,6 +194,46 @@ test('getChildren workspace : arbre virtuel (entry.tree) prioritaire, virtual fo
   assert.equal(files[0].resourceUri!.fsPath, '/proj/src/a.ts');
   assert.equal(files[1].resourceUri!.fsPath, '/proj/workflows/b.py');
   assert.equal(files[1].command?.command, 'vscode.open');
+});
+
+test('revealInExplorer : révèle le fichier virtuel dans le vrai Explorer avec le bon chemin', async () => {
+  resetMock();
+  vscodeMock.workspace.workspaceFolders = [
+    { uri: vscodeMock.Uri.file('/proj') },
+  ];
+  const { provider } = makeProvider();
+  await addViaFlow(provider, 'ABC-1', 'WS');
+  workspacesOf(provider)[0].tree = [
+    {
+      name: 'Logique métier',
+      path: '',
+      type: 'virtualFolder',
+      children: [{ name: 'b.py', path: 'workflows/b.py', type: 'file' }],
+    },
+  ];
+  const ws = (await rootNodes(provider)).find((n) => n.entry)!;
+  const folder = (await provider.getChildren(ws))[0];
+  const file = (await provider.getChildren(folder))[0];
+  await provider.revealInExplorer(file);
+  assert.equal(executedCommands.length, 1);
+  assert.equal(executedCommands[0][0], 'revealInExplorer');
+  assert.equal(executedCommands[0][1].fsPath, '/proj/workflows/b.py');
+});
+
+test('revealInExplorer : no-op sur un dossier ou sans fileNode', async () => {
+  resetMock();
+  vscodeMock.workspace.workspaceFolders = [
+    { uri: vscodeMock.Uri.file('/proj') },
+  ];
+  const { provider } = makeProvider();
+  await addViaFlow(provider, 'ABC-1', 'WS');
+  const ws = (await rootNodes(provider)).find((n) => n.entry)!;
+  await provider.revealInExplorer(ws); // le workspace lui-même n'est pas un fichier
+  const folderNode = new SmartExplorerNode('dossier', 1, {
+    contextValue: 'folder',
+  });
+  await provider.revealInExplorer(folderNode);
+  assert.equal(executedCommands.length, 0);
 });
 
 test('refreshWorkspace : sans clé API, le nom est conservé et rien ne plante', async () => {

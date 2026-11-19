@@ -69,6 +69,11 @@
         "command": "smartExplorer.refreshWorkspace",
         "title": "Smart Explorer: Refresh Workspace",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "smartExplorer.revealInExplorer",
+        "title": "Smart Explorer: Reveal in Explorer",
+        "icon": "$(go-to-file)"
       }
     ],
     "keybindings": [
@@ -99,6 +104,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "smartExplorer.revealInExplorer",
+          "when": "view == smartExplorerView && viewItem == file",
+          "group": "inline"
+        },
         {
           "command": "smartExplorer.refreshWorkspace",
           "when": "view == smartExplorerView && viewItem =~ /^workspace-/",

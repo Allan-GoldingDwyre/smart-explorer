@@ -20,7 +20,9 @@ export function detectRef(input: string): DetectedRef {
   if (linearId) {
     return { type: 'issue', ref: linearId[1].toUpperCase() };
   }
-  const linearUrl = value.match(/linear\.app\/[^/]+\/issue\/([A-Za-z][A-Za-z0-9]+-\d+)/i);
+  const linearUrl = value.match(
+    /linear\.app\/[^/]+\/issue\/([A-Za-z][A-Za-z0-9]+-\d+)/i,
+  );
   if (linearUrl) {
     return { type: 'issue', ref: linearUrl[1].toUpperCase() };
   }
@@ -51,35 +53,54 @@ interface GithubRef {
 function parseGithubRef(ref: string): GithubRef | undefined {
   const url = ref.match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/i);
   if (url) {
-    return { owner: url[1], repo: url[2], kind: url[3].toLowerCase() === 'pull' ? 'pulls' : 'issues', num: url[4] };
+    return {
+      owner: url[1],
+      repo: url[2],
+      kind: url[3].toLowerCase() === 'pull' ? 'pulls' : 'issues',
+      num: url[4],
+    };
   }
   return undefined;
 }
 
 // Extrait owner/repo d'une URL de remote git (HTTPS ou SSH).
-function parseGithubRemote(url: string): { owner: string; repo: string } | undefined {
+function parseGithubRemote(
+  url: string,
+): { owner: string; repo: string } | undefined {
   const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/i);
   return m ? { owner: m[1], repo: m[2] } : undefined;
 }
 
 // Repo GitHub du workspace courant, via le remote "origin" (puis le 1er remote trouvé).
-async function getWorkspaceGithubRepo(): Promise<{ owner: string; repo: string } | undefined> {
+async function getWorkspaceGithubRepo(): Promise<
+  { owner: string; repo: string } | undefined
+> {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
     return undefined;
   }
   const cwd = folder.uri.fsPath;
   try {
-    const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd });
+    const { stdout } = await execFileAsync(
+      'git',
+      ['remote', 'get-url', 'origin'],
+      { cwd },
+    );
     return parseGithubRemote(stdout.trim());
   } catch {
     try {
-      const { stdout: remotes } = await execFileAsync('git', ['remote'], { cwd });
+      const { stdout: remotes } = await execFileAsync('git', ['remote'], {
+        cwd,
+      });
       const remote = remotes.trim().split('\n')[0];
       if (!remote) {
         return undefined;
       }
-      const { stdout: url } = await execFileAsync('git', ['remote', 'get-url', remote], { cwd });
+      const { stdout: url } = await execFileAsync(
+        'git',
+        ['remote', 'get-url', remote],
+        { cwd },
+      );
       return parseGithubRemote(url.trim());
     } catch {
       return undefined;
@@ -88,7 +109,10 @@ async function getWorkspaceGithubRepo(): Promise<{ owner: string; repo: string }
 }
 
 // Résout une ref GitHub : URL complète, ou #123 + repo du workspace courant.
-export async function resolveGithubRef(ref: string, type: WorkspaceType): Promise<GithubRef | undefined> {
+export async function resolveGithubRef(
+  ref: string,
+  type: WorkspaceType,
+): Promise<GithubRef | undefined> {
   const fromUrl = parseGithubRef(ref);
   if (fromUrl) {
     return fromUrl;
@@ -97,14 +121,21 @@ export async function resolveGithubRef(ref: string, type: WorkspaceType): Promis
   if (short) {
     const repo = await getWorkspaceGithubRepo();
     if (repo) {
-      return { ...repo, num: short[1], kind: type === 'pr' ? 'pulls' : 'issues' };
+      return {
+        ...repo,
+        num: short[1],
+        kind: type === 'pr' ? 'pulls' : 'issues',
+      };
     }
   }
   return undefined;
 }
 
 // Canonicalise une ref : #123 devient l'URL complète du repo courant quand on la connaît.
-export async function canonicalizeRef(type: WorkspaceType, ref: string): Promise<string> {
+export async function canonicalizeRef(
+  type: WorkspaceType,
+  ref: string,
+): Promise<string> {
   if (type !== 'issue' && type !== 'pr') {
     return ref;
   }
@@ -122,13 +153,16 @@ async function fetchGithubTitle(gh: GithubRef): Promise<string | undefined> {
   if (!session) {
     return undefined;
   }
-  const res = await fetch(`https://api.github.com/repos/${gh.owner}/${gh.repo}/${gh.kind}/${gh.num}`, {
-    headers: {
-      Authorization: `Bearer ${session.accessToken}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'smart-explorer'
-    }
-  });
+  const res = await fetch(
+    `https://api.github.com/repos/${gh.owner}/${gh.repo}/${gh.kind}/${gh.num}`,
+    {
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'smart-explorer',
+      },
+    },
+  );
   if (!res.ok) {
     return undefined;
   }
@@ -136,7 +170,10 @@ async function fetchGithubTitle(gh: GithubRef): Promise<string | undefined> {
   return data.title;
 }
 
-async function fetchLinearTitle(identifier: string, context: vscode.ExtensionContext): Promise<string | undefined> {
+async function fetchLinearTitle(
+  identifier: string,
+  context: vscode.ExtensionContext,
+): Promise<string | undefined> {
   const token = await getLinearToken(context);
   if (!token) {
     return undefined;
@@ -146,8 +183,8 @@ async function fetchLinearTitle(identifier: string, context: vscode.ExtensionCon
     headers: { Authorization: token, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       query: 'query($id: String!) { issue(id: $id) { title } }',
-      variables: { id: identifier }
-    })
+      variables: { id: identifier },
+    }),
   });
   if (!res.ok) {
     return undefined;
@@ -161,7 +198,7 @@ async function fetchLinearTitle(identifier: string, context: vscode.ExtensionCon
 export async function fetchRefTitle(
   type: WorkspaceType,
   ref: string,
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
 ): Promise<string | undefined> {
   try {
     if ((type === 'issue' || type === 'smart') && isLinearRef(ref)) {

@@ -1,20 +1,43 @@
 import * as vscode from 'vscode';
 import { checkAuthForRef } from './auth';
-import { canonicalizeRef, detectRef, fetchRefTitle, normalizeRef } from './refs';
+import {
+  canonicalizeRef,
+  detectRef,
+  fetchRefTitle,
+  normalizeRef,
+} from './refs';
 import { TypePickItem, WorkspaceEntry, WorkspaceType, truncate } from './types';
 
-export async function runAddWorkspaceFlow(context: vscode.ExtensionContext): Promise<WorkspaceEntry | undefined> {
+export async function runAddWorkspaceFlow(
+  context: vscode.ExtensionContext,
+): Promise<WorkspaceEntry | undefined> {
   const typePick = await vscode.window.showQuickPick<TypePickItem>(
     [
-      { label: '$(lightbulb) Smart', description: 'Auto-detect from a link or ID (e.g. #376)', type: 'smart' },
-      { label: '$(issue-opened) Issue', description: 'Linear or GitHub', type: 'issue' },
-      { label: '$(git-pull-request) PR', description: 'GitHub pull request', type: 'pr' },
-      { label: '$(note) Text', description: 'Free-form description', type: 'text' }
+      {
+        label: '$(lightbulb) Smart',
+        description: 'Auto-detect from a link or ID (e.g. #376)',
+        type: 'smart',
+      },
+      {
+        label: '$(issue-opened) Issue',
+        description: 'Linear or GitHub',
+        type: 'issue',
+      },
+      {
+        label: '$(git-pull-request) PR',
+        description: 'GitHub pull request',
+        type: 'pr',
+      },
+      {
+        label: '$(note) Text',
+        description: 'Free-form description',
+        type: 'text',
+      },
     ],
     {
       title: 'Add Workspace',
-      placeHolder: 'What do you want to add?'
-    }
+      placeHolder: 'What do you want to add?',
+    },
   );
   if (!typePick) {
     return undefined;
@@ -39,7 +62,7 @@ export async function runAddWorkspaceFlow(context: vscode.ExtensionContext): Pro
   const name = await vscode.window.showInputBox({
     title: 'Add Workspace',
     prompt: 'Nom du workspace',
-    value: suggestedName
+    value: suggestedName,
   });
   if (!name) {
     return undefined;
@@ -55,36 +78,51 @@ async function promptForRef(type: WorkspaceType): Promise<{
 }> {
   switch (type) {
     case 'issue':
-      return { ...(await singleInput(
-        'Add Issue',
-        'Lien ou ID de l\'issue (Linear, GitHub : #376, lin-123, URL...)',
-        'lin-123 ou #376 ou https://github.com/org/repo/issues/376'
-      )), detectedType: 'issue' };
+      return {
+        ...(await singleInput(
+          'Add Issue',
+          'Lien ou ID de l’issue (Linear, GitHub : #376, lin-123, URL...)',
+          'lin-123 ou #376 ou https://github.com/org/repo/issues/376',
+        )),
+        detectedType: 'issue',
+      };
     case 'pr':
-      return { ...(await singleInput(
-        'Add PR',
-        'Lien ou numéro de la PR GitHub (#42, URL...)',
-        '#42 ou https://github.com/org/repo/pull/42'
-      )), detectedType: 'pr' };
+      return {
+        ...(await singleInput(
+          'Add PR',
+          'Lien ou numéro de la PR GitHub (#42, URL...)',
+          '#42 ou https://github.com/org/repo/pull/42',
+        )),
+        detectedType: 'pr',
+      };
     case 'smart': {
       const input = await vscode.window.showInputBox({
         title: 'Smart Add',
-        prompt: 'Colle un lien ou un ID, le type sera détecté automatiquement (#376, URL...)',
-        placeHolder: 'https://github.com/org/repo/issues/376'
+        prompt:
+          'Colle un lien ou un ID, le type sera détecté automatiquement (#376, URL...)',
+        placeHolder: 'https://github.com/org/repo/issues/376',
       });
       if (input === undefined) {
         return { ref: undefined, detectedType: 'text', defaultName: '' };
       }
       const detected = detectRef(input);
-      return { ref: detected.ref, detectedType: detected.type, defaultName: defaultNameFor(detected.type, detected.ref) };
+      return {
+        ref: detected.ref,
+        detectedType: detected.type,
+        defaultName: defaultNameFor(detected.type, detected.ref),
+      };
     }
     case 'text': {
       const ref = await vscode.window.showInputBox({
         title: 'Text Workspace',
         prompt: 'Description',
-        placeHolder: 'Écris le contexte ici...'
+        placeHolder: 'Écris le contexte ici...',
       });
-      return { ref, detectedType: 'text', defaultName: ref ? truncate(ref) : '' };
+      return {
+        ref,
+        detectedType: 'text',
+        defaultName: ref ? truncate(ref) : '',
+      };
     }
   }
 }
@@ -103,8 +141,13 @@ function defaultNameFor(type: WorkspaceType, ref: string): string {
 async function singleInput(
   title: string,
   prompt: string,
-  placeHolder: string
+  placeHolder: string,
 ): Promise<{ ref: string | undefined; defaultName: string }> {
   const ref = await vscode.window.showInputBox({ title, prompt, placeHolder });
-  return { ref, defaultName: ref ? `${title.replace('Add ', '').toUpperCase()} ${truncate(ref)}` : '' };
+  return {
+    ref,
+    defaultName: ref
+      ? `${title.replace('Add ', '').toUpperCase()} ${truncate(ref)}`
+      : '',
+  };
 }

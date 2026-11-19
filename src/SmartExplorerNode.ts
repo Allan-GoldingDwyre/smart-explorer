@@ -22,11 +22,13 @@ export class SmartExplorerNode extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    options: SmartExplorerNodeOptions
+    options: SmartExplorerNodeOptions,
   ) {
     super(label, collapsibleState);
     this.contextValue = options.contextValue;
-    this.iconPath = options.iconUri ?? (options.iconId ? new vscode.ThemeIcon(options.iconId) : undefined);
+    this.iconPath =
+      options.iconUri ??
+      (options.iconId ? new vscode.ThemeIcon(options.iconId) : undefined);
     this.resourceUri = options.resourceUri;
     this.description = options.description;
     this.tooltip = options.tooltip;

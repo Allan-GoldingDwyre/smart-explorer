@@ -31,7 +31,7 @@ export const TYPE_ICONS: Record<WorkspaceType, string> = {
   issue: 'issue-opened',
   pr: 'git-pull-request',
   text: 'note',
-  smart: 'lightbulb'
+  smart: 'lightbulb',
 };
 
 export function truncate(s: string, max = 30): string {
