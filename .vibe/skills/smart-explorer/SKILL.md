@@ -47,6 +47,6 @@ toi (l'agent) tu produis le contenu via les tools MCP.
   dans Chat → MCP Servers. Rien à configurer.
 - **Client externe (Vibe, Claude Code CLI, CLI Mistral, macOS/Linux)** : serveur
   stdio autonome, à installer via
-  `curl -fsSL https://raw.githubusercontent.com/<owner>/smart-explorer/main/install.sh | bash`,
+  `curl -fsSL https://raw.githubusercontent.com/Allan-GoldingDwyre/smart-explorer/main/install.sh | bash`,
   puis bloc `smart-explorer` dans le `.mcp.json` du client (voir README). La racine
   du projet se résout via `--root`, `SMART_EXPLORER_ROOT`, ou le cwd du client.

@@ -4,11 +4,11 @@
 # build nécessaire, requiert seulement Node.js >= 18 déjà installé).
 #
 # Usage :
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/smart-explorer/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Allan-GoldingDwyre/smart-explorer/main/install.sh | bash
 #   SMART_EXPLORER_GH_REPO=owner/repo SMART_EXPLORER_HOME=~/.local/share/smart-explorer ./install.sh
 set -euo pipefail
 
-GH_REPO="${SMART_EXPLORER_GH_REPO:-owner/smart-explorer}"
+GH_REPO="${SMART_EXPLORER_GH_REPO:-Allan-GoldingDwyre/smart-explorer}"
 ASSET="smart-explorer-mcp.js"
 HOME_DIR="${SMART_EXPLORER_HOME:-$HOME/.local/share/smart-explorer}"
 

@@ -17,7 +17,7 @@ Le serveur stdio est un **bundle autonome** (Node.js ≥ 18 seulement, aucun bui
 
 ```bash
 # via le script d'installation (dernière release GitHub)
-curl -fsSL https://raw.githubusercontent.com/<owner>/smart-explorer/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Allan-GoldingDwyre/smart-explorer/main/install.sh | bash
 
 # ou à la main depuis une release : télécharger smart-explorer-mcp.js
 # ou depuis les sources : npm ci && npm run build:mcp   # produit dist/smart-explorer-mcp.js

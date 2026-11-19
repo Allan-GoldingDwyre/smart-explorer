@@ -13,7 +13,7 @@
   "main": "./out/extension.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/owner/smart-explorer.git"
+    "url": "https://github.com/Allan-GoldingDwyre/smart-explorer.git"
   },
   "bin": {
     "smart-explorer-mcp": "./out/mcpStdio.js"
