@@ -36,7 +36,6 @@
         "contents": "No workspace in this project yet.\n\n[Add Workspace](command:smartExplorer.addWorkspace)"
       }
     ],
-
     "commands": [
       {
         "command": "smartExplorer.addWorkspace",
@@ -126,6 +125,8 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "compile:test": "tsc -p tsconfig.test.json",
+    "test": "npm run compile:test && node --test out-test/test/",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts"
   },
