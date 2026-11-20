@@ -41,6 +41,7 @@ import {
   WalkMode,
   WalkSession,
   isUiAlive,
+  readUiDisplay,
   readEvents,
   readWalkthrough,
   resetEvents,
@@ -864,7 +865,13 @@ export async function walkthroughStartTool(
     workspace_id?: string;
     outline?: string[];
   },
-): Promise<{ ok: boolean; ui: boolean; session?: string; note?: string }> {
+): Promise<{
+  ok: boolean;
+  ui: boolean;
+  display?: 'vscode' | 'cli';
+  session?: string;
+  note?: string;
+}> {
   const now = env.now ? env.now() : new Date();
   if (!isUiAlive(env.root, now)) {
     return {
@@ -875,6 +882,17 @@ export async function walkthroughStartTool(
   }
   if (!['flow', 'changes', 'review'].includes(args.mode)) {
     err('mode invalide : flow, changes ou review');
+  }
+  // Réglage « cli » : pas de fil de commentaire, VS Code ne sert qu'au focus
+  // (reveal_file) ; l'agent explique dans le terminal et attend « go » ou une
+  // question. Aucune session n'est créée.
+  if (readUiDisplay(env.root) === 'cli') {
+    return {
+      ok: true,
+      ui: false,
+      display: 'cli',
+      note: "Réglage smartExplorer.walkthrough.display = cli : pour chaque étape, `reveal_file` (focus/sélection dans VS Code), explique dans le terminal (1 à 2 phrases), puis demande « go » pour continuer ou une question. N'utilise pas walkthrough_step/walkthrough_wait.",
+    };
   }
   const workspaceId = args.workspace_id ?? readActive(env.root);
   if (args.workspace_id) {
@@ -899,7 +917,7 @@ export async function walkthroughStartTool(
     status: 'active',
     updated_at: now.toISOString(),
   });
-  return { ok: true, ui: true, session: id };
+  return { ok: true, ui: true, display: 'vscode', session: id };
 }
 
 // Pousse l'étape suivante (affichée dans VS Code dès son arrivée). L'agent

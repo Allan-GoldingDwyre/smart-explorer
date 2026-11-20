@@ -249,6 +249,19 @@
           "default": true,
           "description": "Sélectionne dans l'arbre Smart Explorer le fichier ouvert dans l'éditeur (s'il fait partie du workspace mis en avant)."
         },
+        "smartExplorer.walkthrough.display": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "cli"
+          ],
+          "enumDescriptions": [
+            "Tout dans VS Code : explications en fils de commentaire, réponses dans le fil.",
+            "Focus et sélection dans VS Code ; explications dans le CLI, tu écris « go » pour continuer ou ta question."
+          ],
+          "default": "vscode",
+          "description": "Où se déroule la visite guidée : entièrement dans VS Code, ou focus/sélection dans VS Code avec les explications dans le CLI."
+        },
         "smartExplorer.walkthrough.commentPosition": {
           "type": "string",
           "enum": [

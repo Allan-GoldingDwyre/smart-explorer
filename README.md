@@ -78,6 +78,7 @@ Le skill `skills/smart-explorer-baby-steps/SKILL.md` décrit la **visite guidée
 - **Étapes en flux** : l'agent annonce un plan (`walkthrough_start`), puis pousse les étapes une à une (`walkthrough_step`) pendant que tu lis la première ; _Continuer_ est géré par VS Code seul (étape déjà arrivée = affichage immédiat, sinon « génération… » puis affichage dès son arrivée). L'avancement (`étape 2/5 …`) est affiché sur la ligne **Following agent** du panneau.
 - **Commentaires** : écrits dans un fichier d'événements ; l'agent les récupère avec `walkthrough_wait` (appel bloquant, `timeout_s` ≤ 1800 s, rappelé tant que la visite continue) et répond avec `walkthrough_reply`. Si l'agent génère encore des étapes, `pending_comments` lui signale ton commentaire sans attendre.
 - **Repli** : l'extension écrit un signal de vie ; si VS Code n'est pas ouvert sur le projet, `walkthrough_start` répond `ui: false` et l'agent fait la visite dans le terminal.
+- **Mode d'affichage** (réglage `smartExplorer.walkthrough.display`) : `vscode` (défaut) = tout dans VS Code ; `cli` = VS Code ne fait que le focus et la sélection (`reveal_file`), les explications sont dans le terminal et tu écris « go » pour continuer ou ta question (`walkthrough_start` répond alors `ui: false, display: "cli"`).
 
 Trois modes : suivre un **flow**, parcourir les **types de changements clés** d'une issue/PR, ou guider une **review** vers les endroits qui méritent l'attention.
 

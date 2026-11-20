@@ -204,9 +204,30 @@ export function walkProgress(session: WalkSession): {
 // VS Code est ouvert sur ce projet tant que l'extension rafraîchit ce fichier.
 export const UI_ALIVE_MS = 60_000;
 
-export function writeUiHeartbeat(root: string, now: Date = new Date()): void {
+// Où se déroule la visite : « vscode » = tout dans l'éditeur (fils de
+// commentaire) ; « cli » = VS Code ne fait que le focus/la sélection, les
+// explications et le « continuer / question » passent par le terminal.
+export type WalkDisplay = 'vscode' | 'cli';
+
+export function writeUiHeartbeat(
+  root: string,
+  now: Date = new Date(),
+  display: WalkDisplay = 'vscode',
+): void {
   ensureProjectDir(root);
-  fs.writeFileSync(uiFilePath(root), JSON.stringify({ at: now.toISOString() }));
+  fs.writeFileSync(
+    uiFilePath(root),
+    JSON.stringify({ at: now.toISOString(), display }),
+  );
+}
+
+export function readUiDisplay(root: string): WalkDisplay {
+  try {
+    const { display } = JSON.parse(fs.readFileSync(uiFilePath(root), 'utf8'));
+    return display === 'cli' ? 'cli' : 'vscode';
+  } catch {
+    return 'vscode';
+  }
 }
 
 export function isUiAlive(root: string, now: Date = new Date()): boolean {

@@ -73,8 +73,8 @@ Jamais un fichier entier sélectionné, ni une plage qui **englobe deux exemples
 2. **Plan** : décide des étapes (5 à 8 titres courts), sans les rédiger.
 3. **`walkthrough_start`** avec `mode`, `title` (ex. « PR #326 : chrono → jiff ») et `outline`
    (les titres). Écris **une ligne** dans le terminal : « Visite lancée dans VS Code (N étapes). »
-   - Si `ui` vaut **false** : VS Code n'est pas ouvert sur ce projet → **mode terminal**
-     (voir plus bas).
+   - Si `ui` vaut **false** → **mode terminal** (voir plus bas) : soit VS Code n'est pas ouvert
+     sur ce projet, soit `display` vaut `"cli"` (réglage `smartExplorer.walkthrough.display`).
 4. **Pousse les étapes une à une** avec `walkthrough_step` (`title`, `text`, `path`, zone, `diff`
    éventuel, `last: true` sur la dernière). **Dès que l'étape 1 est prête, envoie-la** puis
    enchaîne sur la suivante sans attendre : l'utilisateur la lit pendant que tu génères le reste.
@@ -106,12 +106,16 @@ ce qui demande un regard humain : code smell, logique risquée, erreur mal gér�
 trompeur, test manquant, effet de bord caché. Par étape : la préoccupation (1 phrase) et la
 question à se poser. Rien à signaler sur un fichier : ne l'inclus pas. Dis quand tu n'es pas sûr.
 
-## Mode terminal (repli : `ui: false`)
+## Mode terminal (`ui: false`)
 
-Quand VS Code n'est pas ouvert sur le projet : plus de fils de commentaire. Fais la visite dans
-le terminal, une étape à la fois : `reveal_file` (même règles de zone), 1 à 2 phrases, puis
-**pause obligatoire** « Continuer ? » (outil de questions type `AskUserQuestion` si dispo, sinon
-question en texte et **arrête ton tour**). À la fin, `stop_following`.
+Deux cas, même déroulé : VS Code n'est pas ouvert sur le projet (repli), ou l'utilisateur a choisi
+`smartExplorer.walkthrough.display = cli` (`display: "cli"` : VS Code garde le focus et la
+sélection, mais les explications sont dans le terminal). Plus de fils de commentaire : fais la
+visite dans le terminal, une étape à la fois : `reveal_file` (même règles de zone), 1 à 2 phrases,
+puis **pause obligatoire** : l'utilisateur écrit « go » pour continuer ou pose sa question (réponds
+brièvement, puis redemande). Utilise un outil de questions type `AskUserQuestion` si dispo, sinon
+question en texte et **arrête ton tour**. N'appelle ni `walkthrough_step` ni `walkthrough_wait`.
+À la fin, `stop_following`.
 
 ## À éviter
 

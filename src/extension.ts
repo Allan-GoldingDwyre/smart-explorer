@@ -500,9 +500,26 @@ export function activate(context: vscode.ExtensionContext) {
     }
     // Signal de vie : l'agent sait que VS Code est ouvert sur ce projet (il peut
     // alors faire la visite ici plutôt que dans le terminal).
-    writeUiHeartbeat(root);
-    const heartbeat = setInterval(() => writeUiHeartbeat(root), 20_000);
+    const beat = () =>
+      writeUiHeartbeat(
+        root,
+        new Date(),
+        vscode.workspace
+          .getConfiguration('smartExplorer')
+          .get<string>('walkthrough.display', 'vscode') === 'cli'
+          ? 'cli'
+          : 'vscode',
+      );
+    beat();
+    const heartbeat = setInterval(beat, 20_000);
     disposables.push({ dispose: () => clearInterval(heartbeat) });
+    disposables.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('smartExplorer.walkthrough.display')) {
+          beat();
+        }
+      }),
+    );
     if (walkthrough) {
       const walkWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(projectDir, 'walkthrough.json'),

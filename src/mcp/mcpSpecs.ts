@@ -208,7 +208,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: 'walkthrough_start',
     description:
-      "Lance une visite guidée DANS VS CODE (explications en commentaires au-dessus des lignes, l'utilisateur répond dans le fil) : tout se passe dans l'éditeur, pas dans le terminal. Donne `mode` (flow | changes | review), un `title` et le plan (`outline` : titres des étapes prévues, pour afficher « étape 2/6 »). Si `ui` vaut false, VS Code n'est pas ouvert sur le projet : fais la visite dans le terminal. Ensuite : pousse les étapes avec walkthrough_step, puis attends l'utilisateur avec walkthrough_wait.",
+      "Lance une visite guidée DANS VS CODE (explications en commentaires au-dessus des lignes, l'utilisateur répond dans le fil) : tout se passe dans l'éditeur, pas dans le terminal. Donne `mode` (flow | changes | review), un `title` et le plan (`outline` : titres des étapes prévues, pour afficher « étape 2/6 »). Si `ui` vaut false : soit VS Code n'est pas ouvert (fais la visite dans le terminal), soit `display` vaut « cli » (réglage de l'utilisateur) : VS Code ne sert alors qu'au focus via reveal_file, tu expliques dans le terminal et l'utilisateur écrit « go » ou une question ; la `note` détaille. Ensuite : pousse les étapes avec walkthrough_step, puis attends l'utilisateur avec walkthrough_wait.",
     shape: {
       mode: z.enum(['flow', 'changes', 'review']),
       title: z.string().optional(),

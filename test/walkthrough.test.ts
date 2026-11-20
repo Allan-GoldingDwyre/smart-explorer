@@ -373,3 +373,13 @@ test('walkthrough_wait : prouve que l’agent est vivant en rafraîchissant upda
   await walkthroughWaitTool(env, { timeout_s: 200 }); // plusieurs minutes simulées
   assert.notEqual(readWalkthrough(root)!.updated_at, before);
 });
+
+test('walkthrough_start : réglage display=cli → pas de session, VS Code sert au focus', async () => {
+  const root = makeRoot();
+  writeUiHeartbeat(root, NOW, 'cli');
+  const res = await walkthroughStartTool(makeEnv(root), { mode: 'changes' });
+  assert.equal(res.ok, true);
+  assert.equal(res.ui, false);
+  assert.equal(res.display, 'cli');
+  assert.equal(readWalkthrough(root), undefined);
+});
