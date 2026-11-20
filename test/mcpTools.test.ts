@@ -1,3 +1,4 @@
+import './test-home';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
@@ -15,11 +16,12 @@ import {
   levenshtein,
   listWorkspacesTool,
   revealFileTool,
+  updateFilesTool,
   setActiveWorkspaceTool,
   setInstructionsTool,
   syncWorkspaceTool,
 } from '../src/mcpTools';
-import { loadWorkspace } from '../src/workspaceStore';
+import { loadWorkspace, readActive } from '../src/workspaceStore';
 
 function makeTempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-mcp-'));
@@ -96,26 +98,135 @@ test('create_workspace + list_workspaces + set_instructions + build_tree', async
   });
   assert.deepEqual(instr.instructions, ['i1', 'i2']);
 
-  const tree = {
-    name: '.',
-    dirs: [
-      {
-        name: 'Logique métier',
-        icon: 'symbol-class',
-        files: ['src/a.ts'],
-        dirs: [{ name: 'Stockage', files: ['src/store.ts'] }],
-      },
-    ],
-  };
   const built = await buildTreeTool(env, {
     workspace_id: created.workspace_id,
-    tree,
+    tree: { files: ['src/a.ts', './src/a.ts', 'src/store.ts'] },
   });
-  assert.equal(built.files_count, 2);
+  assert.equal(built.files_count, 2); // doublon retiré
+  assert.deepEqual(built.missing_files, ['src/store.ts']);
   const after = loadWorkspace(root, created.workspace_id);
-  assert.equal(after?.tree?.dirs?.[0].name, 'Logique métier');
+  assert.deepEqual(after?.tree?.files, ['src/a.ts', 'src/store.ts']);
+  assert.equal(after?.tree?.dirs, undefined);
   assert.ok(after?.freshness?.base_commit); // HEAD renseigné
   assert.ok(after?.freshness?.file_hashes?.['src/a.ts']);
+});
+
+test('build_tree : l’agent décide les dossiers, sans limite ; doublons retirés', async () => {
+  const root = makeTempRoot();
+  const env = makeEnv(root);
+  const { workspace_id } = await createWorkspaceTool(env, { source: 'txt' });
+  const built = await buildTreeTool(env, {
+    workspace_id,
+    tree: {
+      files: ['README.md'],
+      dirs: [
+        {
+          name: 'Types simples',
+          files: ['a.rs', 'b.rs'],
+          dirs: [{ name: 'Sous', files: ['c.rs'] }],
+        },
+        { name: 'Storage', files: ['a.rs', 'd.rs'] }, // a.rs déjà placé plus haut
+        { name: 'vide', files: [] },
+        { name: 'D1', files: ['1.rs'] },
+        { name: 'D2', files: ['2.rs'] },
+        { name: 'D3', files: ['3.rs'] },
+        { name: 'D4', files: ['4.rs'] },
+        { name: 'D5', files: ['5.rs'] },
+        { name: 'D6', files: ['6.rs'] },
+      ],
+    },
+  });
+  assert.equal(built.files_count, 11); // a.rs une seule fois
+  assert.equal(built.folders_count, 9); // aucun plafond, "vide" supprimé
+  const ws = loadWorkspace(root, workspace_id);
+  assert.equal(ws?.tree?.dirs?.[0].dirs?.[0].name, 'Sous');
+  await assert.rejects(
+    () =>
+      buildTreeTool(env, { workspace_id, tree: { dirs: [{ files: ['x'] }] } }),
+    /name/,
+  );
+  await assert.rejects(
+    () => buildTreeTool(env, { workspace_id, tree: undefined }),
+    /exactement/,
+  );
+});
+
+test('update_files : into, remove, structure conservée', async () => {
+  const root = makeTempRoot();
+  const env = makeEnv(root);
+  const { workspace_id } = await createWorkspaceTool(env, { source: 'txt' });
+  await buildTreeTool(env, {
+    workspace_id,
+    tree: {
+      dirs: [
+        { name: 'Storage', files: ['s1.rs', 's2.rs'] },
+        { name: 'Tests', files: ['t1.rs'] },
+      ],
+    },
+  });
+  await updateFilesTool(env, {
+    workspace_id,
+    add: ['s3.rs', 'n1.rs'],
+    remove: ['t1.rs'],
+    into: 'Storage',
+  });
+  const tree = loadWorkspace(root, workspace_id)?.tree;
+  assert.deepEqual(tree?.dirs?.map((d) => d.name), ['Storage']); // Tests vidé -> supprimé
+  assert.deepEqual(tree?.dirs?.[0].files, ['s1.rs', 's2.rs', 's3.rs', 'n1.rs']);
+  await updateFilesTool(env, {
+    workspace_id,
+    add: ['r.rs'],
+    into: 'Nouveau/Sous',
+  });
+  assert.equal(
+    loadWorkspace(root, workspace_id)?.tree?.dirs?.[1].dirs?.[0].files?.[0],
+    'r.rs',
+  );
+});
+
+test('build_tree files : fusion automatique, rejouée par update_files ; into refusé', async () => {
+  const root = makeTempRoot();
+  const env = makeEnv(root);
+  const { workspace_id } = await createWorkspaceTool(env, { source: 'txt' });
+  const files = [
+    ...[1, 2, 3].map((i) => `src/a/f${i}.rs`),
+    ...[1, 2, 3].map((i) => `src/b/f${i}.rs`),
+    'src/one/x.rs',
+  ];
+  const built = await buildTreeTool(env, { workspace_id, files });
+  assert.equal(built.mode, 'fusion');
+  assert.equal(built.files_count, 7);
+  const tree = loadWorkspace(root, workspace_id)?.tree;
+  assert.deepEqual(tree?.dirs?.map((d) => d.name), ['a', 'b']);
+  assert.deepEqual(tree?.files, ['src/one/x.rs']); // petit dossier remonté
+
+  await updateFilesTool(env, {
+    workspace_id,
+    remove: ['src/b/f1.rs', 'src/b/f2.rs'],
+  });
+  const after = loadWorkspace(root, workspace_id)?.tree;
+  assert.deepEqual(after?.dirs?.map((d) => d.name), ['a']); // b trop petit -> dissous
+  await assert.rejects(
+    () => updateFilesTool(env, { workspace_id, add: ['z.rs'], into: 'a' }),
+    /into/,
+  );
+  // flat via réglage
+  const flat = await buildTreeTool(env, {
+    workspace_id,
+    files,
+    min_folder_files: 99,
+    max_loose_files: 99,
+  });
+  assert.equal(flat.folders_count, 0);
+  // files et tree ensemble, ou aucun : refusé
+  await assert.rejects(
+    () => buildTreeTool(env, { workspace_id, files, tree: {} }),
+    /exactement/,
+  );
+  await assert.rejects(
+    () => buildTreeTool(env, { workspace_id }),
+    /exactement/,
+  );
 });
 
 test('sync_workspace détecte le diff, apply_sync retire les deleted acceptés', async () => {
@@ -129,7 +240,7 @@ test('sync_workspace détecte le diff, apply_sync retire les deleted acceptés',
   const created = await createWorkspaceTool(env, { source: 'texte de test' });
   await buildTreeTool(env, {
     workspace_id: created.workspace_id,
-    tree: { name: '.', files: ['src/keep.ts', 'src/gone.ts'] },
+    tree: { files: ['src/keep.ts', 'src/gone.ts'] },
   });
 
   // Changement dans le repo : gone.ts supprimé, keep.ts modifié.
@@ -176,7 +287,7 @@ test('apply_sync conserve un fichier supprimé quand il est rejeté', async () =
   const created = await createWorkspaceTool(env, { source: 'txt' });
   await buildTreeTool(env, {
     workspace_id: created.workspace_id,
-    tree: { name: '.', files: ['src/gone.ts'] },
+    tree: { files: ['src/gone.ts'] },
   });
   fs.unlinkSync(path.join(root, 'src/gone.ts'));
   git(root, ['add', '.']);
@@ -202,7 +313,6 @@ test('check_workspace_files : introuvable + candidats fuzzy', async () => {
   await buildTreeTool(env, {
     workspace_id: created.workspace_id,
     tree: {
-      name: '.',
       files: [
         'src/domain/availability_research.py',
         'src/domain/availibility_research.py',
@@ -221,57 +331,44 @@ test('check_workspace_files : introuvable + candidats fuzzy', async () => {
   );
 });
 
-test('export_context primary / with_dependencies / max_tokens', async () => {
+test('export_context : contenu des fichiers, tronqué à max_tokens', async () => {
   const root = makeTempRoot();
-  write(root, 'src/main.py', 'from src.store import Store\nprint(1)\n');
-  write(root, 'src/store.py', 'class Store: pass\n');
-  write(root, 'src/other.py', 'x = 1\n');
+  write(root, 'src/main.py', 'print(1)\n');
   const env = makeEnv(root);
   const created = await createWorkspaceTool(env, { source: 'txt' });
   await buildTreeTool(env, {
     workspace_id: created.workspace_id,
-    tree: { name: '.', files: ['src/main.py'] },
+    tree: { files: ['src/main.py'] },
   });
 
-  const primary = await exportContextTool(env, {
+  const full = await exportContextTool(env, {
     workspace_id: created.workspace_id,
-    mode: 'primary',
   });
-  assert.deepEqual(primary.files, ['src/main.py']);
-  assert.ok(primary.content.includes('--- src/main.py ---'));
-
-  const withDeps = await exportContextTool(env, {
-    workspace_id: created.workspace_id,
-    mode: 'with_dependencies',
-  });
-  assert.ok(withDeps.files.includes('src/store.py'));
+  assert.deepEqual(full.files, ['src/main.py']);
+  assert.ok(full.content.includes('--- src/main.py ---'));
 
   const limited = await exportContextTool(env, {
     workspace_id: created.workspace_id,
-    mode: 'primary',
     max_tokens: 2, // très petit : tronque
   });
   assert.equal(limited.files.length, 0);
   assert.equal(limited.truncated, true);
 });
 
-test('reveal_file + set_active_workspace via hooks', async () => {
+test('set_active_workspace écrit le fichier actif, list_workspaces le relit', async () => {
   const root = makeTempRoot();
   const env = makeEnv(root);
   const created = await createWorkspaceTool(env, { source: 'txt' });
-  const calls: any[] = [];
-  env.revealFile = (p, where) => void calls.push(['reveal', p, where]);
-  env.setActiveWorkspace = (id) => void calls.push(['active', id]);
-  env.getActiveWorkspace = () => created.workspace_id;
-
-  await revealFileTool(env, { path: 'src/a.ts', reveal: 'editor' });
   await setActiveWorkspaceTool(env, { workspace_id: created.workspace_id });
-  assert.deepEqual(calls, [
-    ['reveal', 'src/a.ts', 'editor'],
-    ['active', created.workspace_id],
-  ]);
+  assert.equal(readActive(root), created.workspace_id);
   const listed = await listWorkspacesTool(env);
   assert.equal(listed.active, created.workspace_id);
+});
+
+test('reveal_file : retourne le chemin absolu', async () => {
+  const root = makeTempRoot();
+  const res = await revealFileTool(makeEnv(root), { path: 'src/a.ts' });
+  assert.equal(res.absolute_path, path.join(root, 'src/a.ts'));
 });
 
 test('tools : workspace inconnu -> erreur', async () => {

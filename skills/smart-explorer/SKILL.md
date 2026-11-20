@@ -1,52 +1,80 @@
 ---
 name: smart-explorer
-description: Load when working on a task in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, create_workspace, fetch_source, build_tree, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, set_active_workspace). Use it to organize the task's relevant files into a virtual workspace tree that the user sees in VS Code.
+description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, create_workspace, build_tree, update_files, set_instructions, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, set_active_workspace). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code.
 ---
 
-# Smart Explorer — workspaces à arbre virtuel
+# Smart Explorer — focus sur une issue / PR
 
-Smart Explorer garde, par tâche (issue/PR/texte), une liste de **fichiers primaires**
-groupés en **virtual dirs** dans un fichier YAML par workspace
-(`.smart-explorer/workspaces/<id>.yaml`). L'extension VS Code affiche cet arbre ;
-toi (l'agent) tu produis le contenu via les tools MCP.
+Smart Explorer garde, par tâche (issue, PR ou texte), la liste des **fichiers
+pertinents** et l'affiche dans VS Code sous forme d'un arbre **plat** : tout ce qui
+compte d'un coup d'œil, sans descendre dans des chemins profonds.
 
-## Workflow standard d'une tâche
+**Ton rôle : choisir les bons fichiers.** Le serveur construit l'arbre en _fusionnant_ les
+dossiers : il reprend l'arborescence réelle des fichiers que tu donnes, puis remonte les
+fichiers des petits dossiers vers leur parent. Les vrais fichiers ne bougent jamais.
 
-1. `create_workspace` avec la source (URL issue/PR GitHub ou Linear, ou texte).
-   Optionnel : `instructions` (ex. "grouper par logique métier, utils, déploiement").
-2. `fetch_source` sur la ref → titre, description, fichiers modifiés (PR), SHA.
-3. Lis le graphe d'imports du repo (ts-morph / AST) et sélectionne **uniquement les
-   fichiers primaires** de la tâche (10–20, pas les dépendances transitives).
-4. Groupe-les en virtual dirs selon les instructions (logique métier / utils /
-   déploiement / front / AI agents…), sous-groupes si un groupe est gros.
-5. `build_tree` avec l'arbre : `{ name: ".", dirs: [{ name, icon?, files[], dirs[] }] }`.
-   La vue VS Code se re-render toute seule.
-6. `set_active_workspace` pour basculer la vue sur cette tâche.
+## Workflow
 
-## Maintenance (fraîcheur)
+1. **Lis la source toi-même** (issue/PR) : `gh pr view` / `gh pr diff`, `gh issue view`,
+   ou l'outil web. Le serveur ne la récupère pas.
+2. `create_workspace` avec l'URL (ou le texte) et `instructions` = **le besoin de
+   l'utilisateur** sur cette issue/PR (« relire la migration serde », « corriger le bug
+   d'export »…). Ce n'est pas une consigne d'organisation de dossiers.
+3. Choisis les fichiers **pertinents pour ce besoin** : fichiers modifiés, plus ce qui
+   est nécessaire pour les comprendre (appelants, types, tests concernés). Pas les
+   dépendances transitives.
+4. `build_tree` avec `files` : la liste de chemins (relatifs à la racine du projet).
+   Ne construis pas d'arbre toi-même.
+5. `set_active_workspace` pour afficher le workspace dans la vue.
 
-- `sync_workspace` → diff depuis `base_commit` (added/modified/deleted/renamed)
-  - fichiers dont le hash a dérivé. Ne re-évalue **que** les fichiers changés.
-- `check_workspace_files` → chemins introuvables + candidats fuzzy (renames).
-- `apply_sync` avec `accepted[]` / `rejected[]` → applique le diff validé et met à
-  jour `base_commit` / `file_hashes`.
-- `export_context` (`primary` | `with_dependencies`, `max_tokens?`) → exporte le
-  contexte pour toi-même.
+Le résultat indique `mode`, `files_count`, `folders_count` et `missing_files` (chemins qui
+n'existent pas : corrige-les).
 
-## Règles du format YAML (écrit via build_tree, ne touche pas le disque à la main)
+## Ce que fait la fusion (de bas en haut)
 
-- `tree` = virtual dirs imbriqués : `name` (requis), `icon` (codicon, optionnel),
-  `files` (chemins relatifs au repo), `dirs` (sous-groupes). Rien d'autre.
-- Pas d'icône sur les fichiers : l'extension applique le thème d'icônes VS Code.
-- Virtual dir sans `icon` : l'extension déduit un codicon du nom
-  (test→beaker, front→browser, agent/llm→robot, etc.).
+- Un dossier dont le sous-arbre contient **moins de `min_folder_files` fichiers** (défaut 3) est dissous : ses fichiers remontent au dossier parent.
+- On **s'arrête** quand le parent dépasserait `max_loose_files` fichiers en vrac (défaut 12) : pas de longue liste plate.
+- Un dossier sans fichier propre et avec un seul sous-dossier est sauté :
+  `back/a/b/c/x` devient `back/c/x`.
+- Le préfixe commun à tous les fichiers est retiré.
+- Aucun fichier n'apparaît deux fois.
+
+## Garder la main
+
+- Réglages de `build_tree` : `min_folder_files` élevé (ex. 99, avec `max_loose_files`
+  élevé) = **liste plate** ; `1` = arborescence réelle simplement compactée. Si
+  l'utilisateur demande une liste plate ou plus de structure, règle ces valeurs plutôt que
+  de réduire la liste de fichiers.
+- `tree` à la place de `files` : tu décides toi-même des dossiers et de la place de chaque
+  fichier (`{ files?, dirs?: [{ name, files?, dirs? }] }`). À réserver au cas où la
+  structure réelle ne reflète pas la logique de la tâche. Le serveur retire seulement les
+  doublons et les dossiers vides. Donne `files` OU `tree`, jamais les deux.
+
+## Évolution et maintenance
+
+- `update_files` (`add` / `remove`) pour ajuster sans tout renvoyer : avec un arbre
+  fusionné, la fusion est rejouée sur la nouvelle liste. Avec un arbre `tree`, `into`
+  désigne le dossier qui reçoit les fichiers ajoutés (créé si besoin, ex.
+  `"backend/storage"`) ; le reste de l'arbre est conservé.
+- `sync_workspace` → diff depuis `base_commit` (added / modified / deleted / renamed,
+  fichiers dont le hash a dérivé). `apply_sync` applique ce que l'utilisateur valide
+  (`accepted[]` / `rejected[]`) et remet `base_commit` à jour.
+- `check_workspace_files` → chemins introuvables + candidats (renommages).
+- `export_context` (`max_tokens?`) → contenu des fichiers du workspace.
+
+## Règles
+
+- Pas d'icônes à fournir : l'extension applique le thème d'icônes VS Code de
+  l'utilisateur (Material, etc.), y compris aux dossiers, d'après leur nom.
+- Les données (workspaces) sont stockées hors du projet, dans le dossier de données de
+  l'utilisateur (`~/.local/share/smart-explorer/`). Ne touche jamais aux fichiers à la main.
 
 ## Transports MCP
 
-- **Dans VS Code ≥ 1.99** : serveur in-process (`vscode.createMcpServer`), visible
-  dans Chat → MCP Servers. Rien à configurer.
-- **Client externe (Vibe, Claude Code CLI, CLI Mistral, macOS/Linux)** : serveur
-  stdio autonome, à installer via
+- **Dans VS Code ≥ 1.101** : l'extension déclare le serveur et VS Code le lance
+  (Chat → MCP Servers). Rien à configurer.
+- **Client externe (Vibe, Claude Code CLI, CLI Mistral, macOS/Linux)** : serveur stdio
+  autonome, à installer via
   `curl -fsSL https://raw.githubusercontent.com/Allan-GoldingDwyre/smart-explorer/main/install.sh | bash`,
-  puis bloc `smart-explorer` dans le `.mcp.json` du client (voir README). La racine
-  du projet se résout via `--root`, `SMART_EXPLORER_ROOT`, ou le cwd du client.
+  puis bloc `smart-explorer` dans le `.mcp.json` du client (voir README). La racine du
+  projet se résout via `--root`, `SMART_EXPLORER_ROOT`, ou le cwd du client.

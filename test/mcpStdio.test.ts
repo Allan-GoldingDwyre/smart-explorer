@@ -1,11 +1,13 @@
 // Test d'intégration du serveur MCP stdio : on spawne out/mcpStdio.js et on
 // parle JSON-RPC (initialize → tools/list → tools/call) par stdin/stdout.
+import './test-home';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { readActive, workspaceFilePath } from '../src/workspaceStore';
 
 const SERVER = path.join(__dirname, '..', '..', 'out', 'mcpStdio.js');
 const BUNDLE = path.join(
@@ -88,7 +90,7 @@ async function handshake(rpc: Rpc): Promise<void> {
   rpc.send('notifications/initialized');
 }
 
-test('serveur stdio : handshake + tools/list (11 tools) + tools/call', async () => {
+test('serveur stdio : handshake + tools/list (11 tools, dont update_files) + tools/call', async () => {
   const root = makeTempRoot();
   const rpc = spawnServer(root);
   try {
@@ -102,12 +104,12 @@ test('serveur stdio : handshake + tools/list (11 tools) + tools/call', async () 
       'check_workspace_files',
       'create_workspace',
       'export_context',
-      'fetch_source',
       'list_workspaces',
       'reveal_file',
       'set_active_workspace',
       'set_instructions',
       'sync_workspace',
+      'update_files',
     ]);
 
     // tools/call : create_workspace puis list_workspaces
@@ -117,11 +119,9 @@ test('serveur stdio : handshake + tools/list (11 tools) + tools/call', async () 
     });
     const createdText = created.result.content[0].text;
     assert.ok(createdText.includes('pr-376'));
-    assert.ok(
-      fs.existsSync(
-        path.join(root, '.smart-explorer', 'workspaces', 'pr-376.yaml'),
-      ),
-    );
+    // Les données vivent hors du projet.
+    assert.ok(fs.existsSync(workspaceFilePath(root, 'pr-376')));
+    assert.equal(fs.existsSync(path.join(root, '.smart-explorer')), false);
 
     const listed = await rpc.send('tools/call', {
       name: 'list_workspaces',
@@ -136,26 +136,23 @@ test('serveur stdio : handshake + tools/list (11 tools) + tools/call', async () 
       name: 'build_tree',
       arguments: {
         workspace_id: 'pr-376',
-        tree: { name: '.', dirs: [{ name: 'Métier', files: ['src/a.ts'] }] },
+        tree: { files: ['src/a.ts'] },
       },
     });
     const exported = await rpc.send('tools/call', {
       name: 'export_context',
-      arguments: { workspace_id: 'pr-376', mode: 'primary' },
+      arguments: { workspace_id: 'pr-376' },
     });
     const exportedData = JSON.parse(exported.result.content[0].text);
     assert.deepEqual(exportedData.files, ['src/a.ts']);
     assert.ok(exportedData.content.includes('export const a = 1;'));
 
-    // set_active_workspace écrit .smart-explorer/active (lu par l'extension)
+    // set_active_workspace écrit le fichier actif (lu par l'extension)
     await rpc.send('tools/call', {
       name: 'set_active_workspace',
       arguments: { workspace_id: 'pr-376' },
     });
-    assert.equal(
-      fs.readFileSync(path.join(root, '.smart-explorer', 'active'), 'utf8'),
-      'pr-376',
-    );
+    assert.equal(readActive(root), 'pr-376');
   } finally {
     rpc.close();
   }

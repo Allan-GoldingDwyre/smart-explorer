@@ -7,36 +7,35 @@ import * as path from 'path';
 import {
   DiffEntry,
   SourceType,
+  VirtualDir,
   WorkspaceFile,
   computeFileHashes,
+  flattenTreeFiles,
   deleteWorkspace,
   diffNameStatus,
   fileExists,
-  flattenTreeFiles,
-  githubRemote,
   headCommit,
   listWorkspaces,
+  readActive,
+  writeActive,
   loadWorkspace,
-  removeFileFromTree,
   saveWorkspace,
   treeFiles,
   uniqueWorkspaceId,
   workspaceFilePath,
 } from './workspaceStore';
+import {
+  addFilesToTree,
+  countFolders,
+  normalizeFiles,
+  normalizeTree,
+  removeFilesFromTree,
+} from './treeOps';
+import { FusionOptions, fuseTree } from './treeFusion';
 
 export interface ToolEnv {
   // Racine du workspace VS Code (fsPath du 1er dossier ouvert).
   root: string;
-  // Hooks UI fournis par l'extension (reveal_file, set_active_workspace).
-  revealFile?: (
-    relPath: string,
-    where: 'editor' | 'tree',
-  ) => void | Promise<void>;
-  setActiveWorkspace?: (id: string) => void;
-  getActiveWorkspace?: () => string | undefined;
-  // Tokens optionnels pour fetch_source (GitHub via session VS Code, Linear via secrets).
-  githubToken?: () => Promise<string | undefined>;
-  linearToken?: () => Promise<string | undefined>;
   now?: () => Date;
 }
 
@@ -85,53 +84,6 @@ export function detectSource(input: string): DetectedSource {
   return { type: 'text', ref: value };
 }
 
-interface GithubRef {
-  owner: string;
-  repo: string;
-  num: string;
-  kind: 'issues' | 'pulls';
-}
-
-function parseGithubUrl(ref: string): GithubRef | undefined {
-  const m = ref.match(/github\.com\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)/i);
-  if (!m) {
-    return undefined;
-  }
-  return {
-    owner: m[1],
-    repo: m[2],
-    kind: m[3].toLowerCase() === 'pull' ? 'pulls' : 'issues',
-    num: m[4],
-  };
-}
-
-async function resolveGithubRef(
-  env: ToolEnv,
-  ref: string,
-  type: SourceType,
-): Promise<GithubRef | undefined> {
-  const fromUrl = parseGithubUrl(ref);
-  if (fromUrl) {
-    return fromUrl;
-  }
-  const short = ref.match(/^#(\d+)$/);
-  if (short) {
-    const remote = await githubRemote(env.root);
-    if (remote) {
-      return {
-        ...remote,
-        num: short[1],
-        kind: type === 'pr' ? 'pulls' : 'issues',
-      };
-    }
-  }
-  return undefined;
-}
-
-export function isLinearRef(ref: string): boolean {
-  return /^[A-Z][A-Z0-9]+-\d+$/.test(ref.trim());
-}
-
 // --- Tools ---
 
 export interface WorkspaceSummary {
@@ -166,7 +118,7 @@ export async function listWorkspacesTool(env: ToolEnv): Promise<{
       files_in_tree: treeFiles(ws).length,
     });
   }
-  return { workspaces: summaries, active: env.getActiveWorkspace?.() };
+  return { workspaces: summaries, active: readActive(env.root) };
 }
 
 export async function createWorkspaceTool(
@@ -199,148 +151,130 @@ export async function createWorkspaceTool(
   return { workspace_id: id };
 }
 
-export interface CanonicalSource {
-  type: SourceType;
-  url: string;
-  title?: string;
-  description?: string;
-  files?: string[];
-  head_sha?: string;
+export interface BuildTreeResult {
+  ok: true;
+  mode: 'fusion' | 'custom';
+  files_count: number;
+  folders_count: number;
+  missing_files: string[];
 }
 
-export async function fetchSourceTool(
+// Enregistre l'arbre + la fraîcheur (base_commit, hashes) du workspace.
+async function persistTree(
   env: ToolEnv,
-  args: { ref: string },
-): Promise<CanonicalSource> {
-  const detected = detectSource(args.ref);
-  if (detected.type === 'text') {
-    return { type: 'text', url: detected.ref, description: detected.ref };
-  }
-  if (isLinearRef(detected.ref)) {
-    const token = env.linearToken ? await env.linearToken() : undefined;
-    if (!token) {
-      err(`Ref Linear ${detected.ref} : aucune clé API Linear configurée`);
-    }
-    const res = await fetch('https://api.linear.app/graphql', {
-      method: 'POST',
-      headers: { Authorization: token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query:
-          'query($id: String!) { issue(id: $id) { title description url } }',
-        variables: { id: detected.ref },
-      }),
-    });
-    if (!res.ok) {
-      err(`Linear API a répondu ${res.status}`);
-    }
-    const data = (await res.json()) as {
-      data?: { issue?: { title?: string; description?: string; url?: string } };
-    };
-    const issue = data.data?.issue;
-    if (!issue) {
-      err(`Issue Linear introuvable : ${detected.ref}`);
-    }
-    return {
-      type: 'issue',
-      url: issue.url ?? detected.ref,
-      title: issue.title,
-      description: issue.description ?? undefined,
-    };
-  }
-  const gh = await resolveGithubRef(env, detected.ref, detected.type);
-  if (!gh) {
-    err(`Ref GitHub non résoluble : ${detected.ref}`);
-  }
-  const url = `https://github.com/${gh.owner}/${gh.repo}/${
-    gh.kind === 'pulls' ? 'pull' : 'issues'
-  }/${gh.num}`;
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': 'smart-explorer',
-  };
-  const token = env.githubToken ? await env.githubToken() : undefined;
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const base = `https://api.github.com/repos/${gh.owner}/${gh.repo}`;
-  const res = await fetch(`${base}/${gh.kind}/${gh.num}`, { headers });
-  if (!res.ok) {
-    err(`GitHub API a répondu ${res.status} pour ${url}`);
-  }
-  const data = (await res.json()) as {
-    title?: string;
-    body?: string;
-    head?: { sha?: string };
-  };
-  const out: CanonicalSource = {
-    type: gh.kind === 'pulls' ? 'pr' : 'issue',
-    url,
-    title: data.title,
-    description: data.body ?? undefined,
-    head_sha: data.head?.sha,
-  };
-  if (gh.kind === 'pulls') {
-    const filesRes = await fetch(`${base}/pulls/${gh.num}/files?per_page=100`, {
-      headers,
-    });
-    if (filesRes.ok) {
-      const files = (await filesRes.json()) as { filename?: string }[];
-      out.files = files.map((f) => f.filename ?? '').filter(Boolean);
-    }
-  }
-  return out;
-}
-
-export async function buildTreeTool(
-  env: ToolEnv,
-  args: { workspace_id: string; tree: unknown },
-): Promise<{ ok: true; files_count: number }> {
-  const ws = requireWorkspace(env, args.workspace_id);
-  const tree = normalizeVirtualDir(args.tree, true);
-  if (!tree) {
-    err('tree invalide : objet avec name requis');
+  ws: WorkspaceFile,
+  tree: VirtualDir,
+  fusion?: FusionOptions,
+): Promise<BuildTreeResult> {
+  const files = flattenTreeFiles(tree);
+  if (fusion) {
+    ws.fusion = fusion;
+  } else {
+    delete ws.fusion;
   }
   ws.tree = tree;
   ws.freshness = {
     ...ws.freshness,
     base_commit: (await headCommit(env.root)) ?? ws.freshness?.base_commit,
     synced_at: nowIso(env),
-    file_hashes: computeFileHashes(env.root, flattenTreeFiles(tree)),
+    file_hashes: computeFileHashes(env.root, files),
   };
   saveWorkspace(env.root, ws);
-  return { ok: true, files_count: flattenTreeFiles(tree).length };
+  return {
+    ok: true,
+    mode: fusion ? 'fusion' : 'custom',
+    files_count: files.length,
+    folders_count: countFolders(tree),
+    missing_files: files.filter((f) => !fileExists(env.root, f)),
+  };
 }
 
-// Valide/normalise un virtual dir coming from l'agent. `root` est true pour
-// le noeud racine (name '.' accepté), false pour les sous-dossiers.
-function normalizeVirtualDir(
-  node: any,
-  root: boolean,
-): import('./workspaceStore').VirtualDir | undefined {
-  if (!node || typeof node !== 'object' || typeof node.name !== 'string') {
-    return undefined;
+function stringList(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    err(`${field} doit être une liste de chemins (chaînes)`);
   }
-  if (!root && !node.name.trim()) {
-    return undefined;
+  return value;
+}
+
+function fusionOptions(args: {
+  min_folder_files?: number;
+  max_loose_files?: number;
+}): FusionOptions {
+  const out: FusionOptions = {};
+  if (args.min_folder_files !== undefined) {
+    out.min_folder_files = args.min_folder_files;
   }
-  const dir: import('./workspaceStore').VirtualDir = {
-    name: root ? '.' : node.name,
-  };
-  if (typeof node.icon === 'string' && node.icon.trim()) {
-    dir.icon = node.icon.trim();
+  if (args.max_loose_files !== undefined) {
+    out.max_loose_files = args.max_loose_files;
   }
-  if (Array.isArray(node.files)) {
-    dir.files = node.files.filter((f: any) => typeof f === 'string');
+  return out;
+}
+
+// Deux modes : `files` (l'agent choisit les fichiers, le serveur fusionne les
+// dossiers) ou `tree` (l'agent décide de tout, l'arbre est pris tel quel après
+// retrait des doublons et des dossiers vides).
+export async function buildTreeTool(
+  env: ToolEnv,
+  args: {
+    workspace_id: string;
+    files?: string[];
+    tree?: unknown;
+    min_folder_files?: number;
+    max_loose_files?: number;
+  },
+): Promise<BuildTreeResult> {
+  const ws = requireWorkspace(env, args.workspace_id);
+  if ((args.files === undefined) === (args.tree === undefined)) {
+    err(
+      'fournis exactement un des deux : `files` (fusion automatique) ou `tree` (arbre défini par toi)',
+    );
   }
-  if (Array.isArray(node.dirs)) {
-    const subs = node.dirs
-      .map((d: any) => normalizeVirtualDir(d, false))
-      .filter((d: any) => !!d);
-    if (subs.length) {
-      dir.dirs = subs;
+  if (args.files !== undefined) {
+    const options = fusionOptions(args);
+    const tree = fuseTree(stringList(args.files, 'files'), options);
+    return persistTree(env, ws, tree, options);
+  }
+  let tree: VirtualDir;
+  try {
+    tree = normalizeTree(args.tree);
+  } catch (e) {
+    err((e as Error).message);
+  }
+  return persistTree(env, ws, tree);
+}
+
+// Ajoute/retire des fichiers. Arbre fusionné : la fusion est rejouée sur la
+// nouvelle liste. Arbre défini par l'agent : les fichiers ajoutés vont dans
+// `into` (dossier existant ou créé, "a/b" pour imbriquer ; absent = racine) et
+// le reste de l'arbre est conservé.
+export async function updateFilesTool(
+  env: ToolEnv,
+  args: {
+    workspace_id: string;
+    add?: string[];
+    remove?: string[];
+    into?: string;
+  },
+): Promise<BuildTreeResult> {
+  const ws = requireWorkspace(env, args.workspace_id);
+  const remove = new Set(
+    normalizeFiles(stringList(args.remove ?? [], 'remove')),
+  );
+  const add = normalizeFiles(stringList(args.add ?? [], 'add'));
+  if (ws.fusion) {
+    if (args.into) {
+      err(
+        'into ne s’applique qu’à un arbre défini par `tree` ; ici les dossiers sont calculés par fusion',
+      );
     }
+    const files = normalizeFiles([...treeFiles(ws), ...add]).filter(
+      (f) => !remove.has(f),
+    );
+    return persistTree(env, ws, fuseTree(files, ws.fusion), ws.fusion);
   }
-  return dir;
+  let tree = removeFilesFromTree(ws.tree ?? { name: '.' }, remove);
+  tree = addFilesToTree(tree, add, args.into);
+  return persistTree(env, ws, tree);
 }
 
 export async function setInstructionsTool(
@@ -412,6 +346,7 @@ export async function applySyncTool(
   // conservés (introuvables) s'ils sont rejetés.
   const removed: string[] = [];
   if (ws.tree) {
+    const files = new Set(treeFiles(ws));
     for (const entry of diff) {
       if (entry.status !== 'deleted' && entry.status !== 'renamed') {
         continue;
@@ -419,10 +354,15 @@ export async function applySyncTool(
       const target =
         entry.status === 'renamed' ? entry.old_path ?? entry.path : entry.path;
       if (accepted.has(target) && !rejected.has(target)) {
-        if (removeFileFromTree(ws.tree, target)) {
+        if (files.delete(target)) {
           removed.push(target);
         }
       }
+    }
+    if (removed.length) {
+      ws.tree = ws.fusion
+        ? fuseTree([...files], ws.fusion)
+        : removeFilesFromTree(ws.tree, new Set(removed));
     }
   }
   ws.freshness = {
@@ -469,7 +409,6 @@ const IGNORED_DIRS = new Set([
   '.git',
   'out',
   'dist',
-  '.smart-explorer',
   '__pycache__',
   '.venv',
   'venv',
@@ -551,91 +490,20 @@ export async function checkWorkspaceFilesTool(
 
 // --- Export de contexte ---
 
-export type ExportMode = 'primary' | 'with_dependencies';
-
 export interface ExportResult {
   workspace_id: string;
-  mode: ExportMode;
   files: string[];
   estimated_tokens: number;
   truncated: boolean;
   content: string;
 }
 
-// Détection légère des dépendances directes (imports Python / TS-JS).
-export function findDirectDependencies(
-  root: string,
-  relPath: string,
-  allFiles: string[],
-): string[] {
-  const abs = path.join(root, relPath);
-  let content: string;
-  try {
-    content = fs.readFileSync(abs, 'utf8');
-  } catch {
-    return [];
-  }
-  const dir = path.dirname(relPath);
-  const wanted = new Set<string>();
-  const moduleOf = (spec: string): string =>
-    spec.replace(/\.py$/, '').replace(/\//g, '.');
-  // Python : from x.y import z / import x.y
-  for (const m of content.matchAll(/^\s*from\s+([\w.]+)\s+import/gm)) {
-    wanted.add(moduleOf(m[1]));
-  }
-  for (const m of content.matchAll(/^\s*import\s+([\w.]+)/gm)) {
-    wanted.add(moduleOf(m[1]));
-  }
-  // TS/JS : from './x' / from '../x' / from '@/x'
-  for (const m of content.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
-    const spec = m[1];
-    if (spec.startsWith('.')) {
-      const resolved = path.posix.normalize(path.posix.join(dir, spec));
-      wanted.add(resolved);
-    }
-  }
-  const candidates = new Set(allFiles);
-  const deps = new Set<string>();
-  for (const w of wanted) {
-    for (const ext of ['', '.py', '.ts', '.js', '.tsx', '.jsx']) {
-      const p =
-        (w.startsWith('.') || w.includes('/') ? w : w.replace(/\./g, '/')) +
-        ext;
-      if (candidates.has(p)) {
-        deps.add(p);
-      }
-      const idx = p + '/index';
-      for (const ext2 of ['.py', '.ts', '.js']) {
-        if (candidates.has(idx + ext2)) {
-          deps.add(idx + ext2);
-        }
-      }
-    }
-  }
-  deps.delete(relPath);
-  return [...deps];
-}
-
 export async function exportContextTool(
   env: ToolEnv,
-  args: { workspace_id: string; mode?: ExportMode; max_tokens?: number },
+  args: { workspace_id: string; max_tokens?: number },
 ): Promise<ExportResult> {
   const ws = requireWorkspace(env, args.workspace_id);
-  const mode: ExportMode =
-    args.mode === 'with_dependencies' ? 'with_dependencies' : 'primary';
-  let files = treeFiles(ws);
-  if (mode === 'with_dependencies') {
-    const all = listRepoFiles(env.root);
-    const extra = new Set<string>();
-    for (const f of files) {
-      for (const dep of findDirectDependencies(env.root, f, all)) {
-        if (!files.includes(dep)) {
-          extra.add(dep);
-        }
-      }
-    }
-    files = [...files, ...extra];
-  }
+  const files = treeFiles(ws);
   const maxTokens =
     args.max_tokens && args.max_tokens > 0 ? args.max_tokens : undefined;
   // Estimation : ~4 caractères par token. On tronque en retirant les fichiers
@@ -664,7 +532,6 @@ export async function exportContextTool(
   }
   return {
     workspace_id: ws.id,
-    mode,
     files: kept,
     estimated_tokens: used,
     truncated,
@@ -674,21 +541,22 @@ export async function exportContextTool(
 
 // --- UI ---
 
+// Le client ouvre le fichier lui-même : on retourne son chemin absolu.
 export async function revealFileTool(
   env: ToolEnv,
-  args: { path: string; workspace_id?: string; reveal: 'editor' | 'tree' },
-): Promise<{ ok: true; path: string; reveal: string }> {
+  args: { path: string; workspace_id?: string },
+): Promise<{ ok: true; path: string; absolute_path: string }> {
   if (!args.path) {
     err('path requis');
   }
   if (args.workspace_id) {
     requireWorkspace(env, args.workspace_id);
   }
-  if (!env.revealFile) {
-    err('reveal_file non disponible hors VS Code');
-  }
-  await env.revealFile(args.path, args.reveal ?? 'editor');
-  return { ok: true, path: args.path, reveal: args.reveal ?? 'editor' };
+  return {
+    ok: true,
+    path: args.path,
+    absolute_path: path.join(env.root, args.path),
+  };
 }
 
 export async function setActiveWorkspaceTool(
@@ -696,10 +564,7 @@ export async function setActiveWorkspaceTool(
   args: { workspace_id: string },
 ): Promise<{ ok: true; active: string }> {
   requireWorkspace(env, args.workspace_id);
-  if (!env.setActiveWorkspace) {
-    err('set_active_workspace non disponible hors VS Code');
-  }
-  env.setActiveWorkspace(args.workspace_id);
+  writeActive(env.root, args.workspace_id);
   return { ok: true, active: args.workspace_id };
 }
 
