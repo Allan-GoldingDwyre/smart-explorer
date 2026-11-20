@@ -603,6 +603,22 @@ export function activate(context: vscode.ExtensionContext) {
         const state = root ? readFollow(root) : undefined;
         if (root && state?.status === 'following' && state.focus) {
           await showFocus(root, state.focus);
+          return;
+        }
+        // Rien à suivre (visite arrêtée, suivi expiré…) : on le dit, et on
+        // propose de reprendre à la dernière position connue.
+        log('suivi : rien à suivre (aucune visite, suivi terminé ou expiré)');
+        const resume = 'Reprendre';
+        const choice = state?.focus
+          ? await vscode.window.showInformationMessage(
+              "Smart Explorer : le suivi de l'agent est terminé.",
+              resume,
+            )
+          : await vscode.window.showInformationMessage(
+              "Smart Explorer : l'agent n'a rien mis en avant pour l'instant.",
+            );
+        if (choice === resume) {
+          await vscode.commands.executeCommand('smartExplorer.followAgent');
         }
       },
     ),
