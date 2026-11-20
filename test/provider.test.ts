@@ -156,25 +156,29 @@ test('addInstruction : ajoute le besoin au workspace', async () => {
   ]);
 });
 
-test('workspace actif : la vue ne montre que lui ; un actif périmé est ignoré', async () => {
+test('plusieurs workspaces : tous affichés, l’actif en premier et déplié ; un actif périmé est ignoré', async () => {
   const root = openProject();
   saveWorkspace(root, ws('a'));
   saveWorkspace(root, ws('b'));
-  writeActive(root, 'b');
   const provider = new SmartExplorerProvider();
   assert.deepEqual(
     (await rootNodes(provider)).map((n) => n.label),
-    ['B'],
+    ['A', 'B'],
   );
-  writeActive(root, 'supprime');
+  writeActive(root, 'b');
   provider.reloadFromDisk();
-  assert.equal((await rootNodes(provider)).length, 2); // actif périmé ignoré
-  assert.equal((await rootNodes(provider)).length, 2);
-  writeActive(root, 'a');
+  const nodes = await rootNodes(provider);
+  assert.deepEqual(
+    nodes.map((n) => n.label),
+    ['B', 'A'],
+  );
+  assert.equal(nodes[0].collapsibleState, 2); // Expanded
+  assert.equal(nodes[1].collapsibleState, 1); // Collapsed
+  writeActive(root, 'supprime');
   provider.reloadFromDisk();
   assert.deepEqual(
     (await rootNodes(provider)).map((n) => n.label),
-    ['A'],
+    ['A', 'B'],
   );
 });
 

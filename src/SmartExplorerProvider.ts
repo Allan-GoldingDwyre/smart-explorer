@@ -151,30 +151,31 @@ export class SmartExplorerProvider
     return [];
   }
 
+  // Tous les workspaces du projet ; l'actif (choisi par l'agent ou par
+  // set_active_workspace) vient en premier et est déplié.
   private async getRootChildren(): Promise<SmartExplorerNode[]> {
-    const nodes = this.workspaces.map((w) => {
-      return new SmartExplorerNode(
-        w.name ?? w.source.title ?? w.id,
-        vscode.TreeItemCollapsibleState.Collapsed,
-        {
-          contextValue: `workspace-${w.source.type}`,
-          iconId: TYPE_ICONS[w.source.type] ?? TYPE_ICONS.text,
-          description: truncate(w.source.url),
-          tooltip: [
-            `${w.source.type}: ${w.source.url}`,
-            ...(w.instructions ?? []),
-          ].join('\n'),
-          workspaceFile: w,
-        },
-      );
-    });
-    if (this.activeId) {
-      const active = nodes.filter((n) => n.workspaceFile?.id === this.activeId);
-      if (active.length > 0) {
-        return active;
-      }
-    }
-    return nodes;
+    const ordered = [...this.workspaces].sort(
+      (a, b) => Number(b.id === this.activeId) - Number(a.id === this.activeId),
+    );
+    return ordered.map(
+      (w) =>
+        new SmartExplorerNode(
+          w.name ?? w.source.title ?? w.id,
+          w.id === this.activeId
+            ? vscode.TreeItemCollapsibleState.Expanded
+            : vscode.TreeItemCollapsibleState.Collapsed,
+          {
+            contextValue: `workspace-${w.source.type}`,
+            iconId: TYPE_ICONS[w.source.type] ?? TYPE_ICONS.text,
+            description: truncate(w.source.url),
+            tooltip: [
+              `${w.source.type}: ${w.source.url}`,
+              ...(w.instructions ?? []),
+            ].join('\n'),
+            workspaceFile: w,
+          },
+        ),
+    );
   }
 
   // Enfants d'un workspace : l'arbre construit par l'agent (build_tree).
