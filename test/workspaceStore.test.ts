@@ -15,6 +15,14 @@ import {
   migrateLegacyStore,
   projectDataDir,
   readActive,
+  readFollow,
+  writeFollow,
+  FOLLOW_IDLE_MS,
+  followFilePath,
+  gitDiffStat,
+  gitDiffText,
+  gitShow,
+  revExists,
   removeProjectData,
   writeActive,
   diffNameStatus,
@@ -237,4 +245,78 @@ test('projets orphelins : repérés puis supprimés', () => {
   removeProjectData(orphan.dir);
   assert.equal(fs.existsSync(orphan.dir), false);
   assert.throws(() => removeProjectData(os.tmpdir()), /Refus/);
+});
+
+test('suivi : follow.json, état et expiration après inactivité', () => {
+  const root = makeTempRoot();
+  assert.equal(readFollow(root), undefined);
+  const t0 = new Date('2026-11-20T10:00:00Z');
+  writeFollow(
+    root,
+    {
+      status: 'following',
+      focus: { path: 'a.rs', line: 3, end_line: 5, at: t0.toISOString() },
+    },
+    t0,
+  );
+  assert.equal(readFollow(root, t0)?.status, 'following');
+  assert.equal(readFollow(root, t0)?.focus?.end_line, 5);
+  const later = new Date(t0.getTime() + FOLLOW_IDLE_MS + 1000);
+  assert.equal(readFollow(root, later)?.status, 'ended'); // session périmée
+  writeFollow(root, { status: 'ended' }, t0);
+  assert.equal(readFollow(root, later)?.status, 'ended');
+});
+
+test('gitShow / revExists : contenu d’un fichier à une révision', async () => {
+  const root = makeGitRepo();
+  write(root, 'src/a.rs', 'v1\n');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'c1']);
+  const first = git(root, ['rev-parse', 'HEAD']);
+  write(root, 'src/a.rs', 'v2\n');
+  git(root, ['commit', '-qam', 'c2']);
+  assert.equal(await gitShow(root, first, 'src/a.rs'), 'v1\n');
+  assert.equal(await gitShow(root, 'HEAD', 'src/a.rs'), 'v2\n');
+  assert.equal(await gitShow(root, 'HEAD~1', 'src/a.rs'), 'v1\n');
+  assert.equal(await gitShow(root, first, 'absent.rs'), ''); // ajouté/supprimé : vide
+  assert.equal(await revExists(root, first), true);
+  assert.equal(await revExists(root, 'HEAD~1'), true);
+  assert.equal(await revExists(root, 'nope'), false);
+});
+
+test('suivi : un ancien état « stopped » est lu comme terminé', () => {
+  const root = makeTempRoot();
+  writeFollow(root, { status: 'ended' });
+  fs.writeFileSync(
+    followFilePath(root),
+    JSON.stringify({ status: 'stopped', updated_at: new Date().toISOString() }),
+  );
+  assert.equal(readFollow(root)?.status, 'ended');
+});
+
+test('gitDiffText / gitDiffStat : diff unifié et taille du changement', async () => {
+  const root = makeGitRepo();
+  write(root, 'src/a.rs', 'l1\nl2\nl3\n');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'c1']);
+  const base = git(root, ['rev-parse', 'HEAD']);
+  write(root, 'src/a.rs', 'l1\nCHANGED\nl3\n');
+  write(root, 'src/new.rs', 'n\n');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'c2']);
+
+  const text = await gitDiffText(root, base, 'HEAD', 'src/a.rs');
+  assert.match(text, /@@ -1,3 \+1,3 @@/);
+  assert.match(text, /^-l2$/m);
+  assert.match(text, /^\+CHANGED$/m);
+  // `to` absent : comparé à l'arbre de travail (ici identique à HEAD)
+  assert.equal(await gitDiffText(root, 'HEAD', undefined, 'src/a.rs'), '');
+
+  assert.deepEqual(await gitDiffStat(root, base, 'HEAD', 'src/a.rs'), {
+    changed: 2,
+    existsAtFrom: true,
+  });
+  const created = await gitDiffStat(root, base, 'HEAD', 'src/new.rs');
+  assert.equal(created.existsAtFrom, false);
+  assert.equal(created.changed, 1);
 });

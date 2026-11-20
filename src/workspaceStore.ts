@@ -108,6 +108,79 @@ export function writeActive(root: string, id: string): void {
   fs.writeFileSync(activeFilePath(root), id);
 }
 
+// Suivi de l'agent (baby steps), à la Live Share : l'agent met un fichier/une
+// plage de lignes en avant (tool reveal_file / build_tree avec `focus`), le
+// serveur MCP l'écrit dans follow.json, l'extension le surveille (ouvre le
+// fichier, surligne, affiche la ligne « Following agent » dans la vue).
+// Au lieu du code actuel, montre le diff d'un fichier entre deux révisions.
+// `line`/`end_line` désignent alors le côté `side` (défaut : nouveau).
+export interface DiffRequest {
+  from: string;
+  // Défaut : l'arbre de travail (code actuel).
+  to?: string;
+  // Chemin du fichier à la révision `from` (renommage), défaut : `path`.
+  from_path?: string;
+  side?: 'old' | 'new';
+}
+
+export interface FocusRequest {
+  path: string;
+  line?: number;
+  end_line?: number;
+  match?: string;
+  diff?: DiffRequest;
+  // Workspace à mettre en avant (devient l'actif si différent).
+  workspace_id?: string;
+  at: string;
+}
+
+// following : l'agent mène, la vue suit. ended : le suivi est terminé (l'agent
+// a appelé stop_following, l'utilisateur a cliqué sur Stop, ou la session est
+// périmée). Un nouveau reveal_file de l'agent relance toujours le suivi.
+export type FollowStatus = 'following' | 'ended';
+
+export interface FollowState {
+  status: FollowStatus;
+  focus?: FocusRequest;
+  updated_at: string;
+}
+
+// Une session sans activité depuis ce délai est considérée terminée.
+export const FOLLOW_IDLE_MS = 30 * 60 * 1000;
+
+export function followFilePath(root: string): string {
+  return path.join(projectDataDir(root), 'follow.json');
+}
+
+export function readFollow(
+  root: string,
+  now: Date = new Date(),
+): FollowState | undefined {
+  try {
+    const data = JSON.parse(fs.readFileSync(followFilePath(root), 'utf8'));
+    if (!data || typeof data.status !== 'string') {
+      return undefined;
+    }
+    // Tout état autre que « following » (dont l'ancien « stopped ») = terminé.
+    const status: FollowStatus =
+      data.status === 'following' ? 'following' : 'ended';
+    const idle = now.getTime() - Date.parse(data.updated_at);
+    return { ...data, status: idle > FOLLOW_IDLE_MS ? 'ended' : status };
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeFollow(
+  root: string,
+  state: Omit<FollowState, 'updated_at'>,
+  now: Date = new Date(),
+): void {
+  ensureProjectDir(root);
+  const payload: FollowState = { ...state, updated_at: now.toISOString() };
+  fs.writeFileSync(followFilePath(root), JSON.stringify(payload));
+}
+
 // Crée le dossier du projet et y note le chemin d'origine (sert à repérer
 // les données orphelines quand le projet n'existe plus).
 function ensureProjectDir(root: string): void {
@@ -379,6 +452,120 @@ export async function headCommit(root: string): Promise<string | undefined> {
     return await git(root, ['rev-parse', 'HEAD']);
   } catch {
     return undefined;
+  }
+}
+
+// Contenu d'un fichier à une révision (git show) ; '' s'il n'existe pas à cette
+// révision (fichier ajouté/supprimé).
+export async function gitShow(
+  root: string,
+  rev: string,
+  relPath: string,
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['show', `${rev}:${relPath}`],
+      {
+        cwd: root,
+        maxBuffer: 32 * 1024 * 1024,
+      },
+    );
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
+// Pathspecs d'un fichier (chemin actuel + ancien chemin en cas de renommage).
+function diffPaths(relPath: string, fromPath?: string): string[] {
+  return fromPath && fromPath !== relPath ? [fromPath, relPath] : [relPath];
+}
+
+// Texte du diff unifié d'un fichier entre deux révisions (`to` absent : arbre
+// de travail). Vide s'il n'y a aucun changement.
+export async function gitDiffText(
+  root: string,
+  from: string,
+  to: string | undefined,
+  relPath: string,
+  fromPath?: string,
+): Promise<string> {
+  const args = ['diff', '--no-color', '--no-ext-diff', '-U3', '-M', from];
+  if (to) {
+    args.push(to);
+  }
+  args.push('--', ...diffPaths(relPath, fromPath));
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd: root,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
+export interface DiffStat {
+  // Lignes ajoutées + supprimées (Infinity pour un fichier binaire).
+  changed: number;
+  // Le fichier existe-t-il à la révision `from` ?
+  existsAtFrom: boolean;
+}
+
+// Taille du changement d'un fichier entre deux révisions : sert à refuser un
+// diff trop gros ou sans objet (fichier nouveau).
+export async function gitDiffStat(
+  root: string,
+  from: string,
+  to: string | undefined,
+  relPath: string,
+  fromPath?: string,
+): Promise<DiffStat> {
+  let existsAtFrom = true;
+  try {
+    await execFileAsync(
+      'git',
+      ['cat-file', '-e', `${from}:${fromPath ?? relPath}`],
+      {
+        cwd: root,
+      },
+    );
+  } catch {
+    existsAtFrom = false;
+  }
+  const args = ['diff', '--numstat', '-M', from];
+  if (to) {
+    args.push(to);
+  }
+  args.push('--', ...diffPaths(relPath, fromPath));
+  let changed = 0;
+  try {
+    const { stdout } = await execFileAsync('git', args, { cwd: root });
+    for (const line of stdout.split('\n').filter(Boolean)) {
+      const [added, deleted] = line.split('\t');
+      changed +=
+        added === '-' || deleted === '-'
+          ? Number.POSITIVE_INFINITY
+          : Number(added) + Number(deleted);
+    }
+  } catch {
+    // diff impossible : traité comme un changement nul
+  }
+  return { changed, existsAtFrom };
+}
+
+export async function revExists(root: string, rev: string): Promise<boolean> {
+  try {
+    await execFileAsync(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`],
+      { cwd: root },
+    );
+    return true;
+  } catch {
+    return false;
   }
 }
 

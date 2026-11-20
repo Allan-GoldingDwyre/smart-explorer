@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   DiffEntry,
+  DiffRequest,
   SourceType,
   VirtualDir,
   WorkspaceFile,
@@ -17,7 +18,11 @@ import {
   headCommit,
   listWorkspaces,
   readActive,
+  gitDiffStat,
+  readFollow,
+  revExists,
   writeActive,
+  writeFollow,
   loadWorkspace,
   saveWorkspace,
   treeFiles,
@@ -31,6 +36,14 @@ import {
   normalizeTree,
   removeFilesFromTree,
 } from './treeOps';
+import {
+  MAX_DIFF_LINES,
+  MAX_RANGE_LINES,
+  clampEndLine,
+  isSafeRelPath,
+  isSafeRev,
+  workspaceForFile,
+} from './focus';
 import { FusionOptions, fuseTree } from './treeFusion';
 
 export interface ToolEnv {
@@ -121,6 +134,42 @@ export async function listWorkspacesTool(env: ToolEnv): Promise<{
   return { workspaces: summaries, active: readActive(env.root) };
 }
 
+export interface WorkspaceDetails {
+  id: string;
+  name: string;
+  active: boolean;
+  source: { type: SourceType; url: string };
+  lifecycle?: string;
+  // Le besoin de l'utilisateur sur l'issue/PR (voir create_workspace).
+  instructions: string[];
+  files: string[];
+  tree?: VirtualDir;
+}
+
+// Lecture d'un workspace : source, besoin de l'utilisateur, fichiers retenus
+// et arbre. Sert à s'appuyer sur l'issue/PR et sur le workspace actif (visite
+// guidée, review) sans tout redemander.
+export async function getWorkspaceTool(
+  env: ToolEnv,
+  args: { workspace_id?: string },
+): Promise<WorkspaceDetails> {
+  const id = args.workspace_id ?? readActive(env.root);
+  if (!id) {
+    err('aucun workspace actif : passe workspace_id (voir list_workspaces)');
+  }
+  const ws = requireWorkspace(env, id);
+  return {
+    id: ws.id,
+    name: ws.name ?? ws.source.title ?? ws.id,
+    active: readActive(env.root) === ws.id,
+    source: { type: ws.source.type, url: ws.source.url },
+    lifecycle: ws.lifecycle,
+    instructions: ws.instructions ?? [],
+    files: treeFiles(ws),
+    tree: ws.tree,
+  };
+}
+
 export async function createWorkspaceTool(
   env: ToolEnv,
   args: { source: string; name?: string; instructions?: string[] },
@@ -149,6 +198,143 @@ export async function createWorkspaceTool(
   };
   saveWorkspace(env.root, ws);
   return { workspace_id: id };
+}
+
+export interface FocusTarget {
+  path: string;
+  line?: number;
+  end_line?: number;
+  match?: string;
+  diff?: DiffRequest;
+}
+
+// Prépare une demande de mise en avant : valide les révisions d'un diff
+// (erreur claire plutôt qu'un diff vide dans VS Code) et applique les
+// garde-fous de granularité. Retourne la cible corrigée et des notes pour
+// l'agent :
+//  - un diff n'est gardé que pour un changement de taille raisonnable sur un
+//    fichier qui existait déjà ; sinon on montre le code actuel ;
+//  - la plage est plafonnée (une petite fonction, pas un fichier entier) ;
+//  - sans `line`, `end_line` est ignorée (on parle du fichier entier).
+async function prepareFocus(
+  env: ToolEnv,
+  target: FocusTarget,
+): Promise<{ target: FocusTarget; notes: string[] }> {
+  const notes: string[] = [];
+  const out: FocusTarget = { ...target };
+
+  const { end, clamped } = clampEndLine(target.line, target.end_line);
+  out.end_line = end;
+  if (clamped) {
+    notes.push(
+      `plage plafonnée à ${MAX_RANGE_LINES} lignes (une petite fonction, pas un gros bloc) : une étape par exemple`,
+    );
+  } else if (target.end_line !== undefined && target.line === undefined) {
+    notes.push(
+      'end_line ignorée sans line (fichier entier : aucune sélection)',
+    );
+  }
+
+  const diff = target.diff;
+  if (!diff) {
+    return { target: out, notes };
+  }
+  for (const [name, rev] of [
+    ['from', diff.from],
+    ['to', diff.to],
+  ] as const) {
+    if (rev === undefined && name === 'to') {
+      continue;
+    }
+    if (typeof rev !== 'string' || !isSafeRev(rev)) {
+      err(
+        `diff.${name} invalide : donne un SHA, une branche, un tag ou HEAD~N`,
+      );
+    }
+    if (!(await revExists(env.root, rev))) {
+      err(`diff.${name} : révision introuvable (${rev})`);
+    }
+  }
+  for (const p of [target.path, diff.from_path]) {
+    if (p !== undefined && !isSafeRelPath(p)) {
+      err(`chemin invalide dans diff : ${p}`);
+    }
+  }
+  const stat = await gitDiffStat(
+    env.root,
+    diff.from,
+    diff.to,
+    target.path,
+    diff.from_path,
+  );
+  if (!stat.existsAtFrom) {
+    delete out.diff;
+    notes.push(
+      'diff ignoré : fichier nouveau (absent à `from`) ; code actuel affiché',
+    );
+  } else if (stat.changed === 0) {
+    delete out.diff;
+    notes.push('diff ignoré : aucun changement ; code actuel affiché');
+  } else if (stat.changed > MAX_DIFF_LINES) {
+    delete out.diff;
+    notes.push(
+      `diff ignoré : ${stat.changed} lignes modifiées (max ${MAX_DIFF_LINES}) ; code actuel affiché. Réserve le diff aux petits changements`,
+    );
+  }
+  return { target: out, notes };
+}
+
+// Met un fichier/une plage en avant pour l'extension (canal : follow.json du
+// dossier de données). Sans workspace explicite : celui qui contient le
+// fichier (l'actif s'il en fait partie). Relance toujours le suivi, même si
+// l'utilisateur avait cliqué sur Stop côté VS Code.
+function requestFocus(
+  env: ToolEnv,
+  target: FocusTarget,
+  workspaceId?: string,
+): { workspace?: string } {
+  // (la cible a déjà été validée/corrigée par prepareFocus)
+  if (!target.path || typeof target.path !== 'string') {
+    err('focus.path requis');
+  }
+  const now = env.now ? env.now() : new Date();
+  const relPath = target.path.replace(/\\/g, '/').replace(/^\.\//, '');
+  const active = readActive(env.root);
+  const holders = listWorkspaces(env.root)
+    .filter((w) => treeFiles(w).includes(relPath))
+    .map((w) => w.id);
+  const resolved = workspaceId ?? workspaceForFile(holders, active);
+  if (resolved && resolved !== active) {
+    writeActive(env.root, resolved);
+  }
+  writeFollow(
+    env.root,
+    {
+      status: 'following',
+      focus: {
+        path: relPath,
+        line: target.line,
+        end_line: target.end_line,
+        match: target.match,
+        diff: target.diff,
+        workspace_id: resolved,
+        at: now.toISOString(),
+      },
+    },
+    now,
+  );
+  return { workspace: resolved };
+}
+
+// L'agent a terminé sa visite : la ligne « Following agent » et le
+// surlignage disparaissent dans VS Code.
+export async function stopFollowingTool(
+  env: ToolEnv,
+): Promise<{ ok: true; was: string }> {
+  const now = env.now ? env.now() : new Date();
+  const current = readFollow(env.root, now);
+  writeFollow(env.root, { status: 'ended' }, now);
+  return { ok: true, was: current?.status ?? 'none' };
 }
 
 export interface BuildTreeResult {
@@ -221,6 +407,7 @@ export async function buildTreeTool(
     tree?: unknown;
     min_folder_files?: number;
     max_loose_files?: number;
+    focus?: FocusTarget;
   },
 ): Promise<BuildTreeResult> {
   const ws = requireWorkspace(env, args.workspace_id);
@@ -229,18 +416,27 @@ export async function buildTreeTool(
       'fournis exactement un des deux : `files` (fusion automatique) ou `tree` (arbre défini par toi)',
     );
   }
+  let result: BuildTreeResult;
   if (args.files !== undefined) {
     const options = fusionOptions(args);
     const tree = fuseTree(stringList(args.files, 'files'), options);
-    return persistTree(env, ws, tree, options);
+    result = await persistTree(env, ws, tree, options);
+  } else {
+    let tree: VirtualDir;
+    try {
+      tree = normalizeTree(args.tree);
+    } catch (e) {
+      err((e as Error).message);
+    }
+    result = await persistTree(env, ws, tree);
   }
-  let tree: VirtualDir;
-  try {
-    tree = normalizeTree(args.tree);
-  } catch (e) {
-    err((e as Error).message);
+  // Fin de construction : l'agent peut mettre en avant le fichier/la ligne
+  // qui demande l'attention (ouvert dans VS Code, sélectionné dans l'arbre).
+  if (args.focus) {
+    const prepared = await prepareFocus(env, args.focus);
+    requestFocus(env, prepared.target, ws.id);
   }
-  return persistTree(env, ws, tree);
+  return result;
 }
 
 // Ajoute/retire des fichiers. Arbre fusionné : la fusion est rejouée sur la
@@ -541,21 +737,43 @@ export async function exportContextTool(
 
 // --- UI ---
 
-// Le client ouvre le fichier lui-même : on retourne son chemin absolu.
+// Met un fichier/une plage en avant : VS Code ouvre le fichier, sélectionne la
+// ligne (ou seulement `match`) ou la petite plage `line`..`end_line`, et
+// sélectionne le fichier dans l'arbre. Sans `line` : le fichier entier (aucune
+// sélection). Retourne le chemin absolu (clients hors VS Code) et des `notes`
+// quand un garde-fou a corrigé la demande (plage plafonnée, diff ignoré).
 export async function revealFileTool(
   env: ToolEnv,
-  args: { path: string; workspace_id?: string },
-): Promise<{ ok: true; path: string; absolute_path: string }> {
+  args: {
+    path: string;
+    line?: number;
+    end_line?: number;
+    match?: string;
+    diff?: DiffRequest;
+    workspace_id?: string;
+  },
+): Promise<{
+  ok: true;
+  path: string;
+  absolute_path: string;
+  exists: boolean;
+  notes?: string[];
+}> {
   if (!args.path) {
     err('path requis');
   }
   if (args.workspace_id) {
     requireWorkspace(env, args.workspace_id);
   }
+  const prepared = await prepareFocus(env, args);
+  requestFocus(env, prepared.target, args.workspace_id);
+  const absolute = path.join(env.root, args.path);
   return {
     ok: true,
     path: args.path,
-    absolute_path: path.join(env.root, args.path),
+    absolute_path: absolute,
+    exists: fs.existsSync(absolute),
+    ...(prepared.notes.length ? { notes: prepared.notes } : {}),
   };
 }
 
