@@ -1,15 +1,18 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { SmartExplorerNode } from './SmartExplorerNode';
+import { FOLLOWING_URI_SCHEME, SmartExplorerNode } from './SmartExplorerNode';
 import { TYPE_ICONS, truncate } from './types';
 import {
+  FollowState,
   VirtualDir,
   WorkspaceFile,
   dedupeTree,
   deleteWorkspace as deleteWorkspaceFile,
   listWorkspaces,
   readActive,
+  readFollow,
   saveWorkspace,
+  treeFiles,
   writeActive,
 } from './workspaceStore';
 
@@ -28,6 +31,7 @@ export class SmartExplorerProvider
   // Workspaces du projet ouvert (store YAML partagé avec les tools MCP).
   private workspaces: WorkspaceFile[] = [];
   private activeId?: string;
+  private follow?: FollowState;
 
   constructor(private readonly section: ProviderSection = 'main') {
     this.reloadFromDisk();
@@ -42,6 +46,7 @@ export class SmartExplorerProvider
   reloadFromDisk(): void {
     const root = this.projectRoot();
     this.workspaces = root ? listWorkspaces(root) : [];
+    this.follow = root ? readFollow(root) : undefined;
     // Un actif périmé (workspace supprimé) est ignoré : la vue ne reste pas vide.
     const active = root ? readActive(root) : undefined;
     this.activeId = this.workspaces.some((w) => w.id === active)
@@ -166,15 +171,58 @@ export class SmartExplorerProvider
     return element;
   }
 
+  // Requis par TreeView.reveal (sélection d'un fichier dans l'arbre).
+  getParent(element: SmartExplorerNode): SmartExplorerNode | undefined {
+    return element.parent;
+  }
+
+  // Workspace mis en avant dans la vue du haut (actif, sinon le premier).
+  activeWorkspaceId(): string | undefined {
+    return this.effectiveActiveId();
+  }
+
+  // Ids des workspaces dont l'arbre contient ce fichier.
+  workspacesContaining(relPath: string): string[] {
+    return this.workspaces
+      .filter((w) => treeFiles(w).includes(relPath))
+      .map((w) => w.id);
+  }
+
+  // Noeud d'un fichier (chemin relatif au projet) dans le workspace mis en
+  // avant, ou undefined s'il n'y figure pas.
+  async findFileNode(relPath: string): Promise<SmartExplorerNode | undefined> {
+    const search = async (
+      node: SmartExplorerNode,
+    ): Promise<SmartExplorerNode | undefined> => {
+      if (node.fileNode?.type === 'file' && node.fileNode.path === relPath) {
+        return node;
+      }
+      for (const child of await this.getChildren(node)) {
+        const found = await search(child);
+        if (found) {
+          return found;
+        }
+      }
+      return undefined;
+    };
+    for (const root of await this.getRootChildren()) {
+      const found = await search(root);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+
   async getChildren(element?: SmartExplorerNode): Promise<SmartExplorerNode[]> {
     if (!element) {
       return this.getRootChildren();
     }
     if (element.workspaceFile) {
-      return this.getWorkspaceChildren(element.workspaceFile);
+      return this.getWorkspaceChildren(element.workspaceFile, element);
     }
     if (element.virtualDir) {
-      return this.virtualDirChildren(element.virtualDir);
+      return this.virtualDirChildren(element.virtualDir, element);
     }
     return [];
   }
@@ -186,39 +234,89 @@ export class SmartExplorerProvider
     const shown = this.workspaces.filter((w) =>
       this.section === 'main' ? w.id === active : w.id !== active,
     );
-    return shown.map(
-      (w) =>
-        new SmartExplorerNode(
-          w.name ?? w.source.title ?? w.id,
-          this.section === 'main'
-            ? vscode.TreeItemCollapsibleState.Expanded
-            : vscode.TreeItemCollapsibleState.Collapsed,
-          {
-            contextValue: `workspace-${w.source.type}`,
-            iconId: TYPE_ICONS[w.source.type] ?? TYPE_ICONS.text,
-            description: truncate(w.source.url),
-            tooltip: [
-              `${w.source.type}: ${w.source.url}`,
-              ...(w.instructions ?? []),
-            ].join('\n'),
-            workspaceFile: w,
+    return [...this.followRow(), ...shown.map((w) => this.workspaceNode(w))];
+  }
+
+  // Ligne « Following agent » au-dessus du workspace actif tant que l'agent
+  // mène (disparaît quand l'agent ou l'utilisateur arrête le suivi).
+  private followRow(): SmartExplorerNode[] {
+    const focus = this.follow?.focus;
+    if (
+      this.section !== 'main' ||
+      this.follow?.status !== 'following' ||
+      !focus
+    ) {
+      return [];
+    }
+    return [
+      new SmartExplorerNode(
+        'Following agent',
+        vscode.TreeItemCollapsibleState.None,
+        {
+          id: 'following',
+          contextValue: 'following',
+          iconId: 'eye',
+          iconColor: 'smartExplorer.agentActive',
+          // L'URI permet à la décoration orange de colorer le texte de la ligne.
+          resourceUri: vscode.Uri.from({
+            scheme: FOLLOWING_URI_SCHEME,
+            path: '/agent',
+          }),
+          description: `${path.basename(focus.path)}${
+            focus.line ? `:${focus.line}` : ''
+          }`,
+          tooltip: `Suit l'agent : ${focus.path}${
+            focus.line ? `:${focus.line}` : ''
+          }\nCliquer pour y revenir, ✕ pour arrêter le suivi.`,
+          command: {
+            command: 'smartExplorer.followingAgent',
+            title: "Aller à la position de l'agent",
           },
-        ),
+        },
+      ),
+    ];
+  }
+
+  private workspaceNode(w: WorkspaceFile): SmartExplorerNode {
+    return new SmartExplorerNode(
+      w.name ?? w.source.title ?? w.id,
+      this.section === 'main'
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed,
+      {
+        id: `ws:${w.id}`,
+        contextValue: `workspace-${w.source.type}`,
+        iconId: TYPE_ICONS[w.source.type] ?? TYPE_ICONS.text,
+        description: truncate(w.source.url),
+        tooltip: [
+          `${w.source.type}: ${w.source.url}`,
+          ...(w.instructions ?? []),
+        ].join('\n'),
+        workspaceFile: w,
+      },
     );
   }
 
   // Enfants d'un workspace : l'arbre construit par l'agent (build_tree).
-  private getWorkspaceChildren(ws: WorkspaceFile): SmartExplorerNode[] {
+  private getWorkspaceChildren(
+    ws: WorkspaceFile,
+    parent: SmartExplorerNode,
+  ): SmartExplorerNode[] {
     if (!ws.tree) {
       return [
         new SmartExplorerNode(
           'Aucun fichier — demande à l’agent d’appeler build_tree',
           vscode.TreeItemCollapsibleState.None,
-          { contextValue: 'info', iconId: 'info' },
+          {
+            id: `${parent.id}/info`,
+            parent,
+            contextValue: 'info',
+            iconId: 'info',
+          },
         ),
       ];
     }
-    return this.virtualDirChildren(dedupeTree(ws.tree));
+    return this.virtualDirChildren(dedupeTree(ws.tree), parent);
   }
 
   // Virtual dir -> noeuds : dossiers d'abord, puis fichiers, chacun trié par
@@ -226,7 +324,10 @@ export class SmartExplorerProvider
   // l'utilisateur via resourceUri (un virtual dir "tests" hérite donc de
   // l'icône du dossier "tests" du thème actif). Un `icon` explicite du YAML
   // reste prioritaire (codicon).
-  private virtualDirChildren(dir: VirtualDir): SmartExplorerNode[] {
+  private virtualDirChildren(
+    dir: VirtualDir,
+    parent: SmartExplorerNode,
+  ): SmartExplorerNode[] {
     const nodes: SmartExplorerNode[] = [];
     for (const sub of byName(dir.dirs ?? [], (d) => d.name)) {
       const icon = sub.icon?.trim();
@@ -235,6 +336,8 @@ export class SmartExplorerProvider
           sub.name,
           vscode.TreeItemCollapsibleState.Collapsed,
           {
+            id: `${parent.id}/${sub.name}`,
+            parent,
             contextValue: 'virtualFolder',
             iconId: icon || 'folder',
             resourceUri: icon ? undefined : this.virtualDirUri(sub.name),
@@ -253,7 +356,11 @@ export class SmartExplorerProvider
     }
     for (const file of files) {
       nodes.push(
-        this.toFilePathNode(file, (counts.get(path.basename(file)) ?? 0) > 1),
+        this.toFilePathNode(
+          file,
+          parent,
+          (counts.get(path.basename(file)) ?? 0) > 1,
+        ),
       );
     }
     return nodes;
@@ -271,11 +378,14 @@ export class SmartExplorerProvider
 
   private toFilePathNode(
     relPath: string,
+    parent: SmartExplorerNode,
     ambiguous = false,
   ): SmartExplorerNode {
     const abs = this.fileUri(relPath);
     const name = path.basename(relPath);
     return new SmartExplorerNode(name, vscode.TreeItemCollapsibleState.None, {
+      id: `${parent.id}|${relPath}`,
+      parent,
       contextValue: 'file',
       resourceUri: abs,
       tooltip: relPath,

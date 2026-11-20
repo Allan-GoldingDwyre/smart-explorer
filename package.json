@@ -83,6 +83,20 @@
         "command": "smartExplorer.activateWorkspace",
         "title": "Smart Explorer: Make Workspace Active",
         "icon": "$(arrow-up)"
+      },
+      {
+        "command": "smartExplorer.followingAgent",
+        "title": "Smart Explorer: Go to the agent's position",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "smartExplorer.stopFollowing",
+        "title": "Smart Explorer: Stop following agent",
+        "icon": "$(close)"
+      },
+      {
+        "command": "smartExplorer.followAgent",
+        "title": "Smart Explorer: Follow agent (resume)"
       }
     ],
     "keybindings": [
@@ -102,6 +116,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "smartExplorer.stopFollowing",
+          "when": "view == smartExplorerView && viewItem == following",
+          "group": "inline@1"
+        },
         {
           "command": "smartExplorer.activateWorkspace",
           "when": "view == smartExplorerOthers && viewItem =~ /^workspace-/",
@@ -138,6 +157,38 @@
       {
         "id": "smartExplorer.mcp",
         "label": "Smart Explorer"
+      }
+    ],
+    "configuration": {
+      "title": "Smart Explorer",
+      "properties": {
+        "smartExplorer.followActiveEditor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sélectionne dans l'arbre Smart Explorer le fichier ouvert dans l'éditeur (s'il fait partie du workspace mis en avant)."
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "smartExplorer.agentHighlightBackground",
+        "description": "Surlignage de la plage mise en avant par l'agent (Smart Explorer).",
+        "defaults": {
+          "dark": "#3794ff30",
+          "light": "#0066bf20",
+          "highContrast": "#3794ff60",
+          "highContrastLight": "#0066bf40"
+        }
+      },
+      {
+        "id": "smartExplorer.agentActive",
+        "description": "Couleur de la visite en cours (ligne « Following agent » et fichier de l'agent dans l'arbre).",
+        "defaults": {
+          "dark": "#ff9d2e",
+          "light": "#c25a00",
+          "highContrast": "#ff9d2e",
+          "highContrastLight": "#c25a00"
+        }
       }
     ]
   },

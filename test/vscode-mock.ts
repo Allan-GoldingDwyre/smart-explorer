@@ -13,6 +13,11 @@ class Uri {
   static parse(p: string): Uri {
     return new Uri(p.replace(/^file:\/\//, ''));
   }
+  static from(c: { scheme: string; path?: string; query?: string }): Uri {
+    const u = new Uri(c.path ?? '');
+    u.scheme = c.scheme;
+    return u;
+  }
   static joinPath(base: Uri, ...segments: string[]): Uri {
     return new Uri(path.join(base.fsPath, ...segments));
   }
@@ -46,6 +51,12 @@ export const vscodeMock: any = {
     ) {}
   },
   ThemeIcon: class {
+    constructor(
+      public id: string,
+      public color?: any,
+    ) {}
+  },
+  ThemeColor: class {
     constructor(public id: string) {}
   },
   EventEmitter: class {

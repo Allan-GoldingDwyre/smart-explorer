@@ -12,6 +12,7 @@ import {
   WorkspaceFile,
   listWorkspaces,
   saveWorkspace,
+  writeFollow,
   writeActive,
 } from '../src/workspaceStore';
 import {
@@ -250,4 +251,80 @@ test('fichiers de même nom dans un virtual dir : le vrai dossier est affiché p
     ],
   );
   assert.equal(files[1].tooltip, 'src/a/mod.rs');
+});
+
+test('noeuds : ids stables et parents, findFileNode retrouve un fichier du workspace mis en avant', async () => {
+  const root = openProject();
+  saveWorkspace(
+    root,
+    ws('a', {
+      name: '.',
+      dirs: [{ name: 'storage', files: ['s/x.rs', 's/y.rs'] }],
+      files: ['r.md'],
+    }),
+  );
+  const provider = new SmartExplorerProvider();
+  const node = await provider.findFileNode('s/y.rs');
+  assert.equal(node?.label, 'y.rs');
+  assert.equal(node?.id, 'ws:a/storage|s/y.rs');
+  const folder = provider.getParent(node!);
+  assert.equal(folder?.label, 'storage');
+  const workspace = provider.getParent(folder!);
+  assert.equal(workspace?.id, 'ws:a');
+  assert.equal(provider.getParent(workspace!), undefined);
+  // un noeud recréé garde le même id (requis par TreeView.reveal)
+  const again = await provider.findFileNode('s/y.rs');
+  assert.notEqual(again, node);
+  assert.equal(again?.id, node?.id);
+  assert.equal(await provider.findFileNode('absent.rs'), undefined);
+  assert.equal(provider.activeWorkspaceId(), 'a');
+});
+
+test('workspacesContaining : ids des workspaces dont l’arbre contient le fichier', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a', { name: '.', files: ['x.rs', 'shared.rs'] }));
+  saveWorkspace(root, ws('b', { name: '.', files: ['y.rs', 'shared.rs'] }));
+  const provider = new SmartExplorerProvider();
+  assert.deepEqual(provider.workspacesContaining('x.rs'), ['a']);
+  assert.deepEqual(provider.workspacesContaining('shared.rs'), ['a', 'b']);
+  assert.deepEqual(provider.workspacesContaining('absent.rs'), []);
+});
+
+test('ligne « Following agent » : au-dessus du workspace actif, disparaît quand le suivi s’arrête', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a', { name: '.', files: ['src/x.rs'] }));
+  saveWorkspace(root, ws('b'));
+  const main = new SmartExplorerProvider('main');
+  const others = new SmartExplorerProvider('others');
+  assert.equal((await rootNodes(main))[0].contextValue, 'workspace-pr');
+
+  writeFollow(root, {
+    status: 'following',
+    focus: { path: 'src/x.rs', line: 42, at: new Date().toISOString() },
+  });
+  main.reloadFromDisk();
+  others.reloadFromDisk();
+  const nodes = await rootNodes(main);
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].label, 'Following agent');
+  assert.equal(nodes[0].contextValue, 'following');
+  assert.equal(nodes[0].description, 'x.rs:42');
+  assert.equal(nodes[0].command?.command, 'smartExplorer.followingAgent');
+  // orange : couleur d'icône + URI sur laquelle s'accroche la décoration du texte
+  assert.equal(
+    (nodes[0].iconPath as any).color.id,
+    'smartExplorer.agentActive',
+  );
+  assert.equal(nodes[0].resourceUri?.scheme, 'smart-explorer-following');
+  assert.equal(nodes[1].contextValue, 'workspace-pr'); // le workspace actif juste dessous
+  assert.equal((await rootNodes(others)).length, 1); // pas de ligne dans la vue du bas
+
+  for (const status of ['ended'] as const) {
+    writeFollow(root, { status });
+    main.reloadFromDisk();
+    assert.deepEqual(
+      (await rootNodes(main)).map((n) => n.contextValue),
+      ['workspace-pr'],
+    );
+  }
 });
