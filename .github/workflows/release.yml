@@ -1,7 +1,9 @@
 # Release : sur chaque tag v*.*.*, publie une GitHub Release avec :
 #   - smart-explorer-<version>.vsix  (extension VS Code)
 #   - smart-explorer-mcp.js           (serveur MCP stdio autonome, macOS/Linux)
-#   - install.sh                      (script d'installation curl|bash)
+#   - smart-explorer.vsix             (même .vsix, nom stable pour install.sh)
+#   - skills.tar.gz                   (skills pour Claude Code / Vibe)
+#   - install.sh                      (installeur interactif curl|bash)
 name: release
 
 on:
@@ -27,6 +29,7 @@ jobs:
       - run: npm run compile
       - run: npm run build:mcp
       - run: npx vsce package
+      - run: tar -czf skills.tar.gz -C skills smart-explorer smart-explorer-baby-steps
 
       - name: GitHub Release
         env:
@@ -35,7 +38,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" \
             --title "smart-explorer $VERSION" \
-            --notes "Extension VS Code (vsix) + serveur MCP stdio autonome (smart-explorer-mcp.js). Installation : curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash" \
+            --notes "Extension VS Code (vsix), serveur MCP stdio autonome et skills. Installation : curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash" \
             "smart-explorer-${VERSION}.vsix" \
+            "smart-explorer-${VERSION}.vsix#smart-explorer.vsix" \
+            skills.tar.gz \
             dist/smart-explorer-mcp.js \
             install.sh

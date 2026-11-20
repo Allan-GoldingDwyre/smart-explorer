@@ -31,33 +31,26 @@ npx vsce package        # produit smart-explorer-<version>.vsix
 
 L'icône **Smart Explorer** apparaît dans l'Activity Bar. L'extension déclare le serveur MCP à VS Code (≥ 1.101, `registerMcpServerDefinitionProvider`) : il est visible dans Chat → MCP Servers, rien à configurer.
 
-## 2. Connecter un agent externe (Claude Code, Vibe, CLI Mistral)
-
-Le serveur intégré à VS Code n'est pas utilisable par un client externe ; on passe par le binaire stdio autonome (le même que celui lancé par l'extension) (Node.js ≥ 18, aucun build nécessaire) :
+## 2. Installation en une commande (extension + MCP + skills)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Allan-GoldingDwyre/smart-explorer/main/install.sh | bash
-# installe ~/.local/share/smart-explorer/smart-explorer-mcp.js
 ```
 
-Puis ajoute dans le `.mcp.json` à la racine du projet client (lu par Claude Code, Vibe, etc.) :
+Le script (Node.js ≥ 18) télécharge la dernière release, puis :
 
-```json
-{
-  "mcpServers": {
-    "smart-explorer": {
-      "command": "node",
-      "args": ["/Users/<toi>/.local/share/smart-explorer/smart-explorer-mcp.js"]
-    }
-  }
-}
-```
+- installe l'**extension VS Code** (`code --install-extension`) ;
+- détecte tes agents (**Claude Code**, **Vibe**) et te demande pour lesquels brancher le **serveur MCP** et les **skills** (tout en global, niveau user : `claude mcp add --scope user`, bloc `[[mcp_servers]]` dans `~/.vibe/config.toml`, skills dans `~/.claude/skills` / `~/.vibe/skills`).
 
-Depuis les sources sans install.sh : `npm ci && npm run build:mcp`, puis pointe `args` vers `dist/smart-explorer-mcp.js` (ou `out/mcpStdio.js` après `npm run compile`).
+Options : `--yes` (tous les agents détectés, sans question), `--agents claude,vibe`, `--uninstall` (retire extension, MCP et skills). Relancer le script met à jour sans créer de doublon. Fichiers téléchargés : `~/.local/share/smart-explorer/`.
+
+Le serveur stdio est un binaire autonome (`smart-explorer-mcp.js`) : l'extension déclare déjà son propre serveur à VS Code, celui-ci sert aux clients externes. À la main, depuis les sources : `npm ci && npm run build:mcp`, puis déclare `node dist/smart-explorer-mcp.js` dans le `.mcp.json` de ton client (ou `out/mcpStdio.js` après `npm run compile`).
 
 La racine du projet est résolue par ordre : `--root <path>`, variable `SMART_EXPLORER_ROOT`, sinon le répertoire courant du client. `set_active_workspace` écrit le fichier `active` du projet (dans le dossier de données, voir plus bas), lu par l'extension VS Code (la vue bascule toute seule). `reveal_file` retourne le chemin absolu — c'est le client qui ouvre le fichier.
 
 ## 3. Activer le skill pour l'agent
+
+_Fait automatiquement par `install.sh` (section 2) ; à la main :_
 
 Le dossier `skills/` à la racine du repo est volontairement **cross-IA** (pas lié à un outil précis). Pour que ton agent le charge, copie-le dans le répertoire skills de ton agent :
 
