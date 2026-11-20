@@ -12,7 +12,6 @@ import {
   WorkspaceFile,
   computeFileHashes,
   flattenTreeFiles,
-  deleteWorkspace,
   diffNameStatus,
   fileExists,
   headCommit,
@@ -27,7 +26,6 @@ import {
   saveWorkspace,
   treeFiles,
   uniqueWorkspaceId,
-  workspaceFilePath,
 } from '../core/workspaceStore';
 import {
   addFilesToTree,
@@ -625,7 +623,7 @@ const IGNORED_DIRS = new Set([
 ]);
 
 // Liste les fichiers du repo (chemins relatifs), pour la résolution fuzzy.
-export function listRepoFiles(root: string, max = 5000): string[] {
+function listRepoFiles(root: string, max = 5000): string[] {
   const out: string[] = [];
   const walk = (rel: string) => {
     if (out.length >= max) {
@@ -1135,5 +1133,3 @@ export async function setActiveWorkspaceTool(
   writeActive(env.root, args.workspace_id);
   return { ok: true, active: args.workspace_id };
 }
-
-export { deleteWorkspace, workspaceFilePath };

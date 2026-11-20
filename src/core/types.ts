@@ -1,6 +1,6 @@
 import type { SourceType } from './workspaceStore';
 
-export type FileTreeNodeType = 'file' | 'virtualFolder';
+type FileTreeNodeType = 'file' | 'virtualFolder';
 
 export interface FileTreeNode {
   name: string;

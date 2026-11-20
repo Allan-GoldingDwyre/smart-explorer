@@ -15,9 +15,6 @@
     "type": "git",
     "url": "https://github.com/Allan-GoldingDwyre/smart-explorer.git"
   },
-  "bin": {
-    "smart-explorer-mcp": "./out/mcpStdio.js"
-  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -111,14 +108,6 @@
       {
         "command": "smartExplorer.walkthroughReply",
         "title": "Répondre"
-      },
-      {
-        "command": "smartExplorer.walkthroughSync",
-        "title": "Smart Explorer: Reload walkthrough"
-      },
-      {
-        "command": "smartExplorer.walkthroughTest",
-        "title": "Smart Explorer: Test comment thread"
       }
     ],
     "keybindings": [
@@ -304,8 +293,7 @@
     "test": "npm run compile && npm run compile:test && npm run build:mcp && node --test out-test/test/",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "build:mcp": "esbuild src/mcpStdio.ts --bundle --platform=node --target=node18 --outfile=dist/smart-explorer-mcp.js && chmod +x dist/smart-explorer-mcp.js",
-    "package": "npm run compile && npx vsce package"
+    "build:mcp": "esbuild src/mcpStdio.ts --bundle --platform=node --target=node18 --outfile=dist/smart-explorer-mcp.js && chmod +x dist/smart-explorer-mcp.js"
   },
   "devDependencies": {
     "@types/node": "^20.x",

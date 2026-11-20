@@ -19,7 +19,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as path from 'path';
 import { TOOL_SPECS } from './mcp/mcpSpecs';
 import { ToolEnv } from './mcp/mcpTools';
-import { migrateLegacyStore } from './core/workspaceStore';
 
 function resolveRoot(): string {
   const argIdx = process.argv.indexOf('--root');
@@ -43,7 +42,6 @@ async function main(): Promise<void> {
   // Hors VS Code : pas de hooks UI (reveal_file retourne le chemin absolu ;
   // set_active_workspace écrit le fichier lu par l'extension).
   const env: ToolEnv = { root };
-  migrateLegacyStore(root);
   const server = new McpServer(
     { name: 'smart-explorer', version: '0.0.1' },
     {

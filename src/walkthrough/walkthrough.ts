@@ -18,7 +18,7 @@ import {
 
 export type WalkMode = 'flow' | 'changes' | 'review';
 
-export interface WalkStep {
+interface WalkStep {
   n: number;
   title: string;
   // Explication concise (markdown) affichée dans le fil de commentaire.
@@ -32,7 +32,7 @@ export interface WalkStep {
 }
 
 // Réponse de l'agent dans un fil (`step-<n>` ou `user-<seq>`).
-export interface WalkMessage {
+interface WalkMessage {
   thread: string;
   text: string;
   at: string;
@@ -53,7 +53,7 @@ export interface WalkSession {
   updated_at: string;
 }
 
-export type WalkEventType = 'comment' | 'continue' | 'back' | 'stop';
+type WalkEventType = 'comment' | 'continue' | 'back' | 'stop';
 
 export interface WalkEvent {
   seq: number;
@@ -78,7 +78,7 @@ export function eventsFilePath(root: string): string {
   return path.join(projectDataDir(root), 'walkthrough-events.jsonl');
 }
 
-export function uiFilePath(root: string): string {
+function uiFilePath(root: string): string {
   return path.join(projectDataDir(root), 'ui.json');
 }
 

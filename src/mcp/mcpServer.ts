@@ -4,7 +4,7 @@
 // externes : une seule implémentation (mcpStdio.ts / mcpTools.ts).
 import * as vscode from 'vscode';
 
-export const MCP_PROVIDER_ID = 'smartExplorer.mcp';
+const MCP_PROVIDER_ID = 'smartExplorer.mcp';
 
 export function registerMcpServer(
   context: vscode.ExtensionContext,

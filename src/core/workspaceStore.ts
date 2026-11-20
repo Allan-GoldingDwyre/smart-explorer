@@ -17,19 +17,16 @@ import YAML from 'yaml';
 
 const execFileAsync = promisify(execFile);
 
-// Ancien emplacement (dans le projet), migré au démarrage.
-const LEGACY_DIR = '.smart-explorer';
-
 export type SourceType = 'issue' | 'pr' | 'text';
-export type Lifecycle = 'exploration' | 'issue' | 'branche' | 'pr' | 'mergée';
+type Lifecycle = 'exploration' | 'issue' | 'branche' | 'pr' | 'mergée';
 
-export interface SourceInfo {
+interface SourceInfo {
   type: SourceType;
   url: string;
   title?: string;
 }
 
-export interface Freshness {
+interface Freshness {
   base_commit?: string;
   synced_at?: string;
   file_hashes?: Record<string, string>;
@@ -77,7 +74,7 @@ function realPath(root: string): string {
 }
 
 // Clé stable d'un projet : nom du dossier + hash de son chemin réel.
-export function projectKey(root: string): string {
+function projectKey(root: string): string {
   const real = realPath(root);
   const hash = createHash('sha1').update(real).digest('hex').slice(0, 8);
   return `${slugify(path.basename(real))}-${hash}`;
@@ -91,7 +88,7 @@ export function workspacesDir(root: string): string {
   return path.join(projectDataDir(root), 'workspaces');
 }
 
-export function activeFilePath(root: string): string {
+function activeFilePath(root: string): string {
   return path.join(projectDataDir(root), 'active');
 }
 
@@ -137,7 +134,7 @@ export interface FocusRequest {
 // following : l'agent mène, la vue suit. ended : le suivi est terminé (l'agent
 // a appelé stop_following, l'utilisateur a cliqué sur Stop, ou la session est
 // périmée). Un nouveau reveal_file de l'agent relance toujours le suivi.
-export type FollowStatus = 'following' | 'ended';
+type FollowStatus = 'following' | 'ended';
 
 export interface FollowState {
   status: FollowStatus;
@@ -192,43 +189,6 @@ export function ensureProjectDir(root: string): void {
   }
 }
 
-// Déplace l'ancien store `<root>/.smart-explorer/` vers le dossier de
-// données. Retourne le nombre de workspaces migrés.
-export function migrateLegacyStore(root: string): number {
-  const legacy = path.join(root, LEGACY_DIR);
-  const legacyWs = path.join(legacy, 'workspaces');
-  let moved = 0;
-  if (fs.existsSync(legacyWs)) {
-    ensureProjectDir(root);
-    for (const f of fs
-      .readdirSync(legacyWs)
-      .filter((n) => n.endsWith('.yaml'))) {
-      const dest = path.join(workspacesDir(root), f);
-      if (!fs.existsSync(dest)) {
-        fs.copyFileSync(path.join(legacyWs, f), dest);
-        moved++;
-      }
-      fs.unlinkSync(path.join(legacyWs, f));
-    }
-  }
-  const legacyActive = path.join(legacy, 'active');
-  if (fs.existsSync(legacyActive)) {
-    if (!readActive(root)) {
-      ensureProjectDir(root);
-      fs.copyFileSync(legacyActive, activeFilePath(root));
-    }
-    fs.unlinkSync(legacyActive);
-  }
-  for (const dir of [legacyWs, legacy]) {
-    try {
-      fs.rmdirSync(dir); // seulement s'il est vide
-    } catch {
-      // absent ou non vide : on n'y touche pas
-    }
-  }
-  return moved;
-}
-
 export interface ProjectData {
   dir: string;
   root?: string;
@@ -236,7 +196,7 @@ export interface ProjectData {
 }
 
 // Dossiers de données de tous les projets connus.
-export function listProjectData(): ProjectData[] {
+function listProjectData(): ProjectData[] {
   const base = path.join(dataHome(), 'projects');
   if (!fs.existsSync(base)) {
     return [];
@@ -291,7 +251,7 @@ export function slugify(input: string): string {
   return slug || 'workspace';
 }
 
-export function parseWorkspaceYaml(content: string): WorkspaceFile {
+function parseWorkspaceYaml(content: string): WorkspaceFile {
   const doc = YAML.parse(content) as WorkspaceFile;
   if (!doc || typeof doc !== 'object' || !doc.id || !doc.source) {
     throw new Error('YAML de workspace invalide : champs id/source requis');
@@ -300,7 +260,7 @@ export function parseWorkspaceYaml(content: string): WorkspaceFile {
   return doc;
 }
 
-export function serializeWorkspaceYaml(ws: WorkspaceFile): string {
+function serializeWorkspaceYaml(ws: WorkspaceFile): string {
   return YAML.stringify(ws, { lineWidth: 100 });
 }
 
@@ -315,7 +275,7 @@ export function loadWorkspace(
   return parseWorkspaceYaml(fs.readFileSync(file, 'utf8'));
 }
 
-export function listWorkspaceIds(root: string): string[] {
+function listWorkspaceIds(root: string): string[] {
   const dir = workspacesDir(root);
   if (!fs.existsSync(dir)) {
     return [];
@@ -369,11 +329,11 @@ export function uniqueWorkspaceId(root: string, base: string): string {
 
 // --- Fichiers ---
 
-export function hashContent(content: Buffer | string): string {
+function hashContent(content: Buffer | string): string {
   return 'sha256:' + createHash('sha256').update(content).digest('hex');
 }
 
-export function hashFileContent(file: string): string {
+function hashFileContent(file: string): string {
   return hashContent(fs.readFileSync(file));
 }
 
@@ -569,7 +529,7 @@ export async function revExists(root: string, rev: string): Promise<boolean> {
   }
 }
 
-export type DiffStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+type DiffStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
 export interface DiffEntry {
   status: DiffStatus;

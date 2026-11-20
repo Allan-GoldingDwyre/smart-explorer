@@ -73,34 +73,6 @@ export class WalkthroughController implements vscode.Disposable {
     };
   }
 
-  // Diagnostic : un fil de test sur la ligne courante de l'éditeur actif, pour
-  // vérifier que l'API Comments s'affiche dans cette fenêtre.
-  testThread(): string {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      return 'aucun éditeur actif';
-    }
-    const line = editor.selection.active.line;
-    const thread = this.controller.createCommentThread(
-      editor.document.uri,
-      new vscode.Range(line, 0, line, 1),
-      [
-        {
-          body: new vscode.MarkdownString('Fil de test **Smart Explorer**.'),
-          mode: vscode.CommentMode.Preview,
-          author: { name: AGENT_NAME },
-        },
-      ],
-    );
-    thread.canReply = true;
-    thread.label = 'Test';
-    thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    this.register(`test-${Date.now()}`, thread);
-    return `fil de test créé sur ${editor.document.uri.toString()} ligne ${
-      line + 1
-    }`;
-  }
-
   get active(): boolean {
     return !!this.sessionId;
   }

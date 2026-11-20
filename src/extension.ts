@@ -25,7 +25,6 @@ import {
   gitDiffText,
   gitShow,
   listOrphanProjects,
-  migrateLegacyStore,
   projectDataDir,
   readFollow,
   removeProjectData,
@@ -36,15 +35,6 @@ import {
 
 export function activate(context: vscode.ExtensionContext) {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (root) {
-    // Anciennes données (dans le projet) -> dossier de données utilisateur.
-    try {
-      migrateLegacyStore(root);
-    } catch {
-      // migration best-effort : le store reste utilisable
-    }
-  }
-
   // Deux vues : le workspace actif (haut) et les autres, repliés (bas).
   const provider = new SmartExplorerProvider('main');
   const othersProvider = new SmartExplorerProvider('others');
@@ -583,14 +573,6 @@ export function activate(context: vscode.ExtensionContext) {
     othersView,
     ...disposables,
     vscode.commands.registerCommand('smartExplorer.refresh', reload),
-    vscode.commands.registerCommand('smartExplorer.walkthroughSync', () =>
-      syncWalk(),
-    ),
-    vscode.commands.registerCommand('smartExplorer.walkthroughTest', () => {
-      const result = walkthrough?.testThread() ?? 'visite guidée indisponible';
-      log(`test : ${result}`);
-      void vscode.window.showInformationMessage(`Smart Explorer : ${result}`);
-    }),
     vscode.commands.registerCommand(
       'smartExplorer.walkthroughNext',
       () => walkthrough?.next(),

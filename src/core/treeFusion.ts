@@ -24,8 +24,8 @@ export interface FusionOptions {
   max_loose_files?: number;
 }
 
-export const DEFAULT_MIN_FOLDER_FILES = 3;
-export const DEFAULT_MAX_LOOSE_FILES = 12;
+const DEFAULT_MIN_FOLDER_FILES = 3;
+const DEFAULT_MAX_LOOSE_FILES = 12;
 
 interface Node {
   name: string;

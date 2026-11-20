@@ -12,7 +12,6 @@ import {
   dataHome,
   deleteWorkspace,
   listOrphanProjects,
-  migrateLegacyStore,
   projectDataDir,
   readActive,
   readFollow,
@@ -212,18 +211,6 @@ test('les données vivent hors du projet (dossier de données utilisateur)', () 
   assert.deepEqual(fs.readdirSync(root), []); // rien écrit dans le projet
   writeActive(root, 'w');
   assert.equal(readActive(root), 'w');
-});
-
-test('migrateLegacyStore : déplace .smart-explorer/ du projet vers le dossier de données', () => {
-  const root = makeTempRoot();
-  const yaml = 'version: 1\nid: old\nsource:\n  type: text\n  url: u\n';
-  write(root, '.smart-explorer/workspaces/old.yaml', yaml);
-  write(root, '.smart-explorer/active', 'old');
-  assert.equal(migrateLegacyStore(root), 1);
-  assert.equal(loadWorkspace(root, 'old')?.id, 'old');
-  assert.equal(readActive(root), 'old');
-  assert.equal(fs.existsSync(path.join(root, '.smart-explorer')), false);
-  assert.equal(migrateLegacyStore(root), 0); // idempotent
 });
 
 test('projets orphelins : repérés puis supprimés', () => {
