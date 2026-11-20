@@ -9,7 +9,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "repository": {
     "type": "git",
@@ -108,6 +110,10 @@
       {
         "command": "smartExplorer.walkthroughReply",
         "title": "Répondre"
+      },
+      {
+        "command": "smartExplorer.walkthroughSync",
+        "title": "Smart Explorer: Reload walkthrough"
       }
     ],
     "keybindings": [

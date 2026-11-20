@@ -414,19 +414,25 @@ export function activate(context: vscode.ExtensionContext) {
   // Relecture de la visite : sur changement de walkthrough.json (watcher) ET par
   // sondage (un renommage atomique peut échapper au watcher). Les erreurs sont
   // journalisées, jamais silencieuses.
+  // Les relectures sont mises bout à bout : le watcher et le sondage peuvent
+  // se déclencher ensemble, et deux sync() concurrents créeraient deux fils.
+  let walkQueue: Promise<unknown> = Promise.resolve();
   const syncWalk = () => {
-    log('visite guidée : relecture');
-    return walkthrough
-      ?.sync()
-      .then(() => log('visite guidée : relecture terminée'))
-      .catch((e) => {
-        log(`visite guidée : ERREUR ${errText(e)}`);
-        void vscode.window.showWarningMessage(
-          `Smart Explorer : visite guidée impossible (${errText(
-            e,
-          )}). Voir Sortie → Smart Explorer.`,
-        );
-      });
+    walkQueue = walkQueue.then(() => {
+      log('visite guidée : relecture');
+      return walkthrough
+        ?.sync()
+        .then(() => log('visite guidée : relecture terminée'))
+        .catch((e) => {
+          log(`visite guidée : ERREUR ${errText(e)}`);
+          void vscode.window.showWarningMessage(
+            `Smart Explorer : visite guidée impossible (${errText(
+              e,
+            )}). Voir Sortie → Smart Explorer.`,
+          );
+        });
+    });
+    return walkQueue;
   };
 
   // Le fichier regardé (cmd+P, onglets, clic, reveal_file…) est sélectionné
@@ -573,6 +579,9 @@ export function activate(context: vscode.ExtensionContext) {
     othersView,
     ...disposables,
     vscode.commands.registerCommand('smartExplorer.refresh', reload),
+    vscode.commands.registerCommand('smartExplorer.walkthroughSync', () =>
+      syncWalk(),
+    ),
     vscode.commands.registerCommand(
       'smartExplorer.walkthroughNext',
       () => walkthrough?.next(),
