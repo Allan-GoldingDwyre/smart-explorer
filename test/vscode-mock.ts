@@ -26,9 +26,6 @@ export const inputQueue: (string | undefined)[] = [];
 export const quickPickQueue: any[] = [];
 export const warningQueue: any[] = [];
 
-// Faux système de fichiers pour vscode.workspace.fs.readDirectory : fsPath -> entrées.
-export const fakeFs = new Map<string, [string, number][]>();
-
 // Commandes exécutées via vscode.commands.executeCommand : [commande, ...args].
 export const executedCommands: any[][] = [];
 
@@ -67,9 +64,6 @@ export const vscodeMock: any = {
   },
   workspace: {
     workspaceFolders: [] as any[],
-    fs: {
-      readDirectory: async (uri: Uri) => fakeFs.get(uri.fsPath) ?? [],
-    },
     getConfiguration: () => ({ get: () => undefined }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
   },
@@ -113,7 +107,6 @@ export function resetMock(): void {
   inputQueue.length = 0;
   quickPickQueue.length = 0;
   warningQueue.length = 0;
-  fakeFs.clear();
   executedCommands.length = 0;
   vscodeMock.workspace.workspaceFolders = [];
 }

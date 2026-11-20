@@ -11,7 +11,7 @@ test('truncate : court inchangé, long tronqué avec ellipse', () => {
 });
 
 test('TYPE_ICONS : couvre tous les types de workspace', () => {
-  for (const t of ['issue', 'pr', 'text', 'smart'] as const) {
+  for (const t of ['issue', 'pr', 'text'] as const) {
     assert.ok(TYPE_ICONS[t], `icône manquante pour ${t}`);
   }
 });

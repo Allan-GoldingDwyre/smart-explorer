@@ -1,26 +1,44 @@
+import './test-home';
 import './vscode-mock';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { SmartExplorerProvider } from '../src/SmartExplorerProvider';
 import { SmartExplorerNode } from '../src/SmartExplorerNode';
-import { FileTreeNode, WorkspaceEntry } from '../src/types';
 import {
-  fakeFs,
-  inputQueue,
+  VirtualDir,
+  WorkspaceFile,
+  listWorkspaces,
+  saveWorkspace,
+  writeActive,
+} from '../src/workspaceStore';
+import {
   executedCommands,
-  makeContext,
-  quickPickQueue,
+  inputQueue,
   resetMock,
   vscodeMock,
+  warningQueue,
 } from './vscode-mock';
 
-function makeProvider(): { provider: SmartExplorerProvider; context: any } {
-  const context = makeContext();
-  return { provider: new SmartExplorerProvider(context), context };
+// Projet temporaire ouvert dans la "fenêtre" simulée.
+function openProject(): string {
+  resetMock();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'se-provider-'));
+  vscodeMock.workspace.workspaceFolders = [{ uri: vscodeMock.Uri.file(root) }];
+  return root;
 }
 
-function workspacesOf(provider: SmartExplorerProvider): WorkspaceEntry[] {
-  return (provider as any).workspaces;
+function ws(id: string, tree?: VirtualDir): WorkspaceFile {
+  return {
+    version: 1,
+    id,
+    name: id.toUpperCase(),
+    source: { type: 'pr', url: `https://github.com/o/r/pull/${id}` },
+    instructions: ['relire la migration'],
+    tree,
+  };
 }
 
 async function rootNodes(
@@ -29,218 +47,170 @@ async function rootNodes(
   return provider.getChildren(undefined);
 }
 
-async function addViaFlow(
-  provider: SmartExplorerProvider,
-  ref: string,
-  name: string,
-): Promise<void> {
-  quickPickQueue.push({ label: 'Smart', type: 'smart' });
-  inputQueue.push(ref, name);
-  await provider.addWorkspace();
-}
-
-test('addWorkspace : ajoute et persiste dans workspaceState', async () => {
-  resetMock();
-  const { provider, context } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'Mon WS');
-  assert.equal(workspacesOf(provider).length, 1);
-  assert.deepEqual(workspacesOf(provider)[0], {
-    name: 'Mon WS',
-    type: 'issue',
-    ref: 'ABC-1',
-  });
-  const stored = context.workspaceState.get('smartExplorer.workspaces', []);
-  assert.equal(stored.length, 1);
+test('racine : un noeud repliable par workspace du projet', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  saveWorkspace(root, ws('b'));
+  const nodes = await rootNodes(new SmartExplorerProvider());
+  assert.deepEqual(
+    nodes.map((n) => n.label),
+    ['A', 'B'],
+  );
+  assert.equal(nodes[0].contextValue, 'workspace-pr');
+  assert.equal(nodes[0].collapsibleState, 1);
 });
 
-test('addWorkspace : doublon (même type + ref) refusé avec warning', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'Un');
-  await addViaFlow(provider, 'abc-1', 'Deux'); // normalisé en ABC-1 -> doublon
-  assert.equal(workspacesOf(provider).length, 1);
-  assert.equal(workspacesOf(provider)[0].name, 'Un');
+test('racine : projet sans workspace -> vue vide (welcome page)', async () => {
+  openProject();
+  assert.deepEqual(await rootNodes(new SmartExplorerProvider()), []);
 });
 
-test('addWorkspace : annulé par l’utilisateur -> rien ajouté', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  quickPickQueue.push(undefined);
-  await provider.addWorkspace();
-  assert.equal(workspacesOf(provider).length, 0);
+test('workspace sans arbre : invite à appeler build_tree', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  const provider = new SmartExplorerProvider();
+  const children = await provider.getChildren((await rootNodes(provider))[0]);
+  assert.equal(children.length, 1);
+  assert.equal(children[0].contextValue, 'info');
 });
 
-test('renameWorkspace : met à jour le nom et persiste', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'Ancien');
-  const node = (await rootNodes(provider)).find((n) => n.entry);
-  inputQueue.push('Nouveau');
-  await provider.renameWorkspace(node);
-  assert.equal(workspacesOf(provider)[0].name, 'Nouveau');
+test('arbre virtuel : dossiers d’abord, puis fichiers, triés par nom, sans doublon', async () => {
+  const root = openProject();
+  saveWorkspace(
+    root,
+    ws('a', {
+      name: '.',
+      files: ['src/zeta.rs', 'lib/Alpha.rs', 'src/zeta.rs'],
+      dirs: [
+        { name: 'tests', files: ['t/b.rs', 't/a.rs'] },
+        { name: 'storage', files: ['s/x.rs'] },
+      ],
+    }),
+  );
+  const provider = new SmartExplorerProvider();
+  const children = await provider.getChildren((await rootNodes(provider))[0]);
+  assert.deepEqual(
+    children.map((c) => c.label),
+    ['storage', 'tests', 'Alpha.rs', 'zeta.rs'],
+  );
+  assert.equal(children[0].contextValue, 'virtualFolder');
+  // Le virtual dir hérite de l'icône de dossier du thème via resourceUri.
+  assert.equal(path.basename(children[0].resourceUri!.fsPath), 'storage');
+  const files = await provider.getChildren(children[1]);
+  assert.deepEqual(
+    files.map((f) => f.label),
+    ['a.rs', 'b.rs'],
+  );
+  assert.equal(files[0].resourceUri!.fsPath, path.join(root, 't/a.rs'));
+  assert.equal(files[0].command?.command, 'vscode.open');
 });
 
-test('renameWorkspace : sans sélection -> no-op', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'Ancien');
+test('virtual dir avec icon explicite : codicon, pas de resourceUri', async () => {
+  const root = openProject();
+  saveWorkspace(
+    root,
+    ws('a', {
+      name: '.',
+      dirs: [{ name: 'x', icon: 'beaker', files: ['x/a.rs'] }],
+    }),
+  );
+  const provider = new SmartExplorerProvider();
+  const [dir] = await provider.getChildren((await rootNodes(provider))[0]);
+  assert.equal((dir.iconPath as any).id, 'beaker');
+  assert.equal(dir.resourceUri, undefined);
+});
+
+test('renameWorkspace : met à jour le nom et persiste ; sans sélection -> no-op', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  const provider = new SmartExplorerProvider();
   await provider.renameWorkspace(undefined);
-  assert.equal(workspacesOf(provider)[0].name, 'Ancien');
+  assert.equal(listWorkspaces(root)[0].name, 'A');
+  inputQueue.push('Nouveau');
+  await provider.renameWorkspace((await rootNodes(provider))[0]);
+  assert.equal(listWorkspaces(root)[0].name, 'Nouveau');
 });
 
 test('deleteWorkspace : confirmé -> supprimé ; annulé -> conservé', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const node = (await rootNodes(provider)).find((n) => n.entry)!;
-  const { warningQueue } = await import('./vscode-mock');
-  warningQueue.push(undefined); // annulation
-  await provider.deleteWorkspace(node);
-  assert.equal(workspacesOf(provider).length, 1);
-  warningQueue.push('Supprimer'); // confirmation
-  await provider.deleteWorkspace(node);
-  assert.equal(workspacesOf(provider).length, 0);
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  const provider = new SmartExplorerProvider();
+  warningQueue.push(undefined);
+  await provider.deleteWorkspace((await rootNodes(provider))[0]);
+  assert.equal(listWorkspaces(root).length, 1);
+  warningQueue.push('Supprimer');
+  await provider.deleteWorkspace((await rootNodes(provider))[0]);
+  assert.equal(listWorkspaces(root).length, 0);
+  assert.deepEqual(await rootNodes(provider), []);
 });
 
-test('addInstruction : ajoute une instruction au workspace', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const node = (await rootNodes(provider)).find((n) => n.entry)!;
-  inputQueue.push('focus logique métier');
-  await provider.addInstruction(node);
-  assert.deepEqual(workspacesOf(provider)[0].instructions, [
-    'focus logique métier',
+test('addInstruction : ajoute le besoin au workspace', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  const provider = new SmartExplorerProvider();
+  inputQueue.push('ignorer les tests');
+  await provider.addInstruction((await rootNodes(provider))[0]);
+  assert.deepEqual(listWorkspaces(root)[0].instructions, [
+    'relire la migration',
+    'ignorer les tests',
   ]);
 });
 
-test('getChildren racine : nœud Setup Linear quand pas de clé, puis workspaces repliables', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const roots = await rootNodes(provider);
-  assert.equal(roots[0].label, 'Setup Linear');
-  const ws = roots.find((n) => n.entry)!;
-  assert.equal(ws.label, 'WS');
-  assert.equal(
-    ws.collapsibleState,
-    vscodeMock.TreeItemCollapsibleState.Collapsed,
+test('workspace actif : la vue ne montre que lui ; un actif périmé est ignoré', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  saveWorkspace(root, ws('b'));
+  writeActive(root, 'b');
+  const provider = new SmartExplorerProvider();
+  assert.deepEqual(
+    (await rootNodes(provider)).map((n) => n.label),
+    ['B'],
   );
-  assert.equal(ws.contextValue, 'workspace-issue');
+  writeActive(root, 'supprime');
+  provider.reloadFromDisk();
+  assert.equal((await rootNodes(provider)).length, 2); // actif périmé ignoré
+  assert.equal((await rootNodes(provider)).length, 2);
+  writeActive(root, 'a');
+  provider.reloadFromDisk();
+  assert.deepEqual(
+    (await rootNodes(provider)).map((n) => n.label),
+    ['A'],
+  );
 });
 
-test('getChildren workspace : arbre physique du projet, dossiers d’abord, node_modules ignoré, fichiers ouvrables', async () => {
-  resetMock();
-  vscodeMock.workspace.workspaceFolders = [
-    { uri: vscodeMock.Uri.file('/proj') },
-  ];
-  const D = vscodeMock.FileType.Directory;
-  const F = vscodeMock.FileType.File;
-  fakeFs.set('/proj', [
-    ['src', D],
-    ['README.md', F],
-    ['node_modules', D],
-  ]);
-  fakeFs.set('/proj/src', [['index.ts', F]]);
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const ws = (await rootNodes(provider)).find((n) => n.entry)!;
-  const children = await provider.getChildren(ws);
-  assert.deepEqual(
-    children.map((c) => c.label),
-    ['src', 'README.md'],
+test('revealInExplorer : chemin du fichier virtuel ; no-op sur un dossier', async () => {
+  const root = openProject();
+  saveWorkspace(
+    root,
+    ws('a', { name: '.', dirs: [{ name: 'd', files: ['w/b.py'] }] }),
   );
-  assert.equal(children[0].contextValue, 'folder');
-  assert.equal(children[1].contextValue, 'file');
-  assert.equal(children[1].command?.command, 'vscode.open');
-  assert.equal(children[1].resourceUri!.fsPath, '/proj/README.md');
-  const srcChildren = await provider.getChildren(children[0]);
-  assert.deepEqual(
-    srcChildren.map((c) => c.label),
-    ['index.ts'],
-  );
-  assert.equal(srcChildren[0].resourceUri!.fsPath, '/proj/src/index.ts');
-});
-
-test('getChildren workspace : arbre virtuel (entry.tree) prioritaire, virtual folders supportés', async () => {
-  resetMock();
-  vscodeMock.workspace.workspaceFolders = [
-    { uri: vscodeMock.Uri.file('/proj') },
-  ];
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const virtualTree: FileTreeNode[] = [
-    {
-      name: 'Logique métier',
-      path: '',
-      type: 'virtualFolder',
-      children: [
-        { name: 'a.ts', path: 'src/a.ts', type: 'file' },
-        { name: 'b.py', path: 'workflows/b.py', type: 'file' },
-      ],
-    },
-  ];
-  workspacesOf(provider)[0].tree = virtualTree;
-  const ws = (await rootNodes(provider)).find((n) => n.entry)!;
-  const children = await provider.getChildren(ws);
-  assert.equal(children.length, 1);
-  assert.equal(children[0].label, 'Logique métier');
-  assert.equal(children[0].contextValue, 'folder');
-  const files = await provider.getChildren(children[0]);
-  assert.deepEqual(
-    files.map((f) => f.label),
-    ['a.ts', 'b.py'],
-  );
-  assert.equal(files[0].resourceUri!.fsPath, '/proj/src/a.ts');
-  assert.equal(files[1].resourceUri!.fsPath, '/proj/workflows/b.py');
-  assert.equal(files[1].command?.command, 'vscode.open');
-});
-
-test('revealInExplorer : révèle le fichier virtuel dans le vrai Explorer avec le bon chemin', async () => {
-  resetMock();
-  vscodeMock.workspace.workspaceFolders = [
-    { uri: vscodeMock.Uri.file('/proj') },
-  ];
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  workspacesOf(provider)[0].tree = [
-    {
-      name: 'Logique métier',
-      path: '',
-      type: 'virtualFolder',
-      children: [{ name: 'b.py', path: 'workflows/b.py', type: 'file' }],
-    },
-  ];
-  const ws = (await rootNodes(provider)).find((n) => n.entry)!;
-  const folder = (await provider.getChildren(ws))[0];
+  const provider = new SmartExplorerProvider();
+  const folder = (
+    await provider.getChildren((await rootNodes(provider))[0])
+  )[0];
+  await provider.revealInExplorer(folder);
+  assert.equal(executedCommands.length, 0);
   const file = (await provider.getChildren(folder))[0];
   await provider.revealInExplorer(file);
-  assert.equal(executedCommands.length, 1);
   assert.equal(executedCommands[0][0], 'revealInExplorer');
-  assert.equal(executedCommands[0][1].fsPath, '/proj/workflows/b.py');
+  assert.equal(executedCommands[0][1].fsPath, path.join(root, 'w/b.py'));
 });
 
-test('revealInExplorer : no-op sur un dossier ou sans fileNode', async () => {
-  resetMock();
-  vscodeMock.workspace.workspaceFolders = [
-    { uri: vscodeMock.Uri.file('/proj') },
-  ];
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const ws = (await rootNodes(provider)).find((n) => n.entry)!;
-  await provider.revealInExplorer(ws); // le workspace lui-même n'est pas un fichier
-  const folderNode = new SmartExplorerNode('dossier', 1, {
-    contextValue: 'folder',
-  });
-  await provider.revealInExplorer(folderNode);
-  assert.equal(executedCommands.length, 0);
-});
-
-test('refreshWorkspace : sans clé API, le nom est conservé et rien ne plante', async () => {
-  resetMock();
-  const { provider } = makeProvider();
-  await addViaFlow(provider, 'ABC-1', 'WS');
-  const node = (await rootNodes(provider)).find((n) => n.entry)!;
-  await provider.refreshWorkspace(node);
-  assert.equal(workspacesOf(provider)[0].name, 'WS');
+test('fichiers de même nom dans un virtual dir : le vrai dossier est affiché pour les distinguer', async () => {
+  const root = openProject();
+  saveWorkspace(
+    root,
+    ws('a', { name: '.', files: ['src/a/mod.rs', 'src/b/mod.rs', 'src/c.rs'] }),
+  );
+  const provider = new SmartExplorerProvider();
+  const files = await provider.getChildren((await rootNodes(provider))[0]);
+  assert.deepEqual(
+    files.map((f) => [f.label, f.description]),
+    [
+      ['c.rs', undefined],
+      ['mod.rs', 'src/a'],
+      ['mod.rs', 'src/b'],
+    ],
+  );
+  assert.equal(files[1].tooltip, 'src/a/mod.rs');
 });

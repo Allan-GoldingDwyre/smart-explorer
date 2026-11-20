@@ -1,39 +1,18 @@
-import * as vscode from 'vscode';
+import type { SourceType } from './workspaceStore';
 
-export type WorkspaceType = 'issue' | 'pr' | 'text' | 'smart';
-
-export interface WorkspaceEntry {
-  name: string;
-  type: WorkspaceType;
-  ref: string;
-  // Id du store YAML quand le workspace y est persisté (shared state MCP).
-  id?: string;
-  instructions?: string[];
-  // Arbre virtuel fourni par l'agent (virtual folders). S'il est présent,
-  // il est affiché à la place de l'arbre physique du projet.
-  tree?: FileTreeNode[];
-}
-
-export type FileTreeNodeType = 'file' | 'folder' | 'virtualFolder';
+export type FileTreeNodeType = 'file' | 'virtualFolder';
 
 export interface FileTreeNode {
   name: string;
-  // Chemin relatif depuis la racine du projet (les virtual folders
-  // regroupent des fichiers venant de dossiers différents).
+  // Chemin relatif depuis la racine du projet (vide pour un virtual folder).
   path: string;
   type: FileTreeNodeType;
-  children?: FileTreeNode[];
 }
 
-export interface TypePickItem extends vscode.QuickPickItem {
-  type: WorkspaceType;
-}
-
-export const TYPE_ICONS: Record<WorkspaceType, string> = {
+export const TYPE_ICONS: Record<SourceType, string> = {
   issue: 'issue-opened',
   pr: 'git-pull-request',
   text: 'note',
-  smart: 'lightbulb',
 };
 
 export function truncate(s: string, max = 30): string {
