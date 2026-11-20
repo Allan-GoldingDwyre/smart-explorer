@@ -7,7 +7,7 @@ Un explorateur de fichiers plus intelligent pour VS Code, piloté par un agent I
 - Tree view custom dans l'Activity Bar VS Code
 - Arbre plat des fichiers pertinents d'une issue/PR, clic pour ouvrir, bouton refresh
 - **Serveur MCP intégré à l'extension** (VS Code ≥ 1.101, déclaré par l'extension et lancé par VS Code) : un agent MCP pilote les workspaces via 18 tools (`list_workspaces`, `get_workspace`, `create_workspace`, `build_tree`, `update_files`, `set_instructions`, `sync_workspace`, `apply_sync`, `check_workspace_files`, `export_context`, `reveal_file`, `stop_following`, `set_active_workspace`, et la visite guidée : `walkthrough_start`, `walkthrough_step`, `walkthrough_reply`, `walkthrough_wait`, `walkthrough_end`). L'extension reste le rendering + registry.
-- **Serveur MCP stdio pour clients externes** (Claude Code, Vibe, CLI Mistral — voir ci-dessous) : bundle autonome `smart-explorer-mcp.js`, mêmes 18 tools, logique partagée dans `src/mcpTools.ts`.
+- **Serveur MCP stdio pour clients externes** (Claude Code, Vibe, CLI Mistral — voir ci-dessous) : bundle autonome `smart-explorer-mcp.js`, mêmes 18 tools, logique partagée dans `src/mcp/mcpTools.ts`.
 - **Skill agent** cross-IA dans `skills/smart-explorer/SKILL.md` : documente le workflow complet pour n'importe quel agent MCP.
 
 ## 1. Installer l'extension dans VS Code
@@ -140,13 +140,22 @@ smart-explorer/
 │       └── SKILL.md              # Skill cross-IA pour agents MCP externes
 ├── src/
 │   ├── extension.ts              # Entry point (activate/deactivate)
-│   ├── SmartExplorerProvider.ts  # TreeDataProvider (vue)
-│   ├── workspaceStore.ts         # Store YAML hors projet, fraîcheur, migration
-│   ├── treeFusion.ts             # Fusion de dossiers (build_tree files)
-│   ├── treeOps.ts                # Validation/doublons d'un arbre fourni par l'agent
-│   ├── mcpSpecs.ts / mcpTools.ts # Définition des 18 tools + logique partagée
-│   ├── mcpServer.ts              # Déclare le serveur MCP à VS Code
-│   └── mcpStdio.ts               # Entrée stdio pour clients externes
+│   ├── mcpStdio.ts               # Entrée stdio pour clients externes
+│   ├── core/                     # Données et logique pures
+│   │   ├── workspaceStore.ts     # Store YAML hors projet, fraîcheur, migration
+│   │   ├── types.ts
+│   │   ├── focus.ts              # Suivi (follow.json)
+│   │   ├── treeFusion.ts         # Fusion de dossiers (build_tree files)
+│   │   └── treeOps.ts            # Validation/doublons d'un arbre fourni par l'agent
+│   ├── mcp/
+│   │   ├── mcpSpecs.ts / mcpTools.ts # Définition des 18 tools + logique partagée
+│   │   └── mcpServer.ts          # Déclare le serveur MCP à VS Code
+│   ├── view/
+│   │   ├── SmartExplorerProvider.ts  # TreeDataProvider (vue)
+│   │   └── SmartExplorerNode.ts
+│   └── walkthrough/
+│       ├── walkthrough.ts        # Protocole de fichiers de la visite guidée
+│       └── walkthroughController.ts  # Fils de commentaire dans l'éditeur
 ├── resources/
 │   └── icon.svg                  # Activity bar icon
 └── .vscode/

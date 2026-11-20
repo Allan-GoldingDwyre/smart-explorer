@@ -1,14 +1,14 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { FOLLOWING_URI_SCHEME, SmartExplorerNode } from './SmartExplorerNode';
-import { TYPE_ICONS, truncate } from './types';
+import { TYPE_ICONS, truncate } from '../core/types';
 import {
   WalkSession,
   isLiveSession,
   readEvents,
   readWalkthrough,
   walkProgress,
-} from './walkthrough';
+} from '../walkthrough/walkthrough';
 import {
   FollowState,
   VirtualDir,
@@ -21,7 +21,7 @@ import {
   saveWorkspace,
   treeFiles,
   writeActive,
-} from './workspaceStore';
+} from '../core/workspaceStore';
 
 // 'main' : le workspace actif, déplié. 'others' : les autres workspaces du
 // projet, repliés (vue du bas).

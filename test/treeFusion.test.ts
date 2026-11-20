@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fuseTree } from '../src/treeFusion';
-import { flattenTreeFiles as listTreeFiles } from '../src/workspaceStore';
+import { fuseTree } from '../src/core/treeFusion';
+import { flattenTreeFiles as listTreeFiles } from '../src/core/workspaceStore';
 
 const W = 'apps/catalogue-worker/';
 

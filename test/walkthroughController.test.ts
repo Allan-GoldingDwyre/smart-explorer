@@ -5,19 +5,19 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { WalkthroughController } from '../src/walkthroughController';
+import { WalkthroughController } from '../src/walkthrough/walkthroughController';
 import {
   ToolEnv,
   walkthroughReplyTool,
   walkthroughStartTool,
   walkthroughStepTool,
   walkthroughWaitTool,
-} from '../src/mcpTools';
+} from '../src/mcp/mcpTools';
 import {
   readEvents,
   readWalkthrough,
   writeUiHeartbeat,
-} from '../src/walkthrough';
+} from '../src/walkthrough/walkthrough';
 import { executedCommands, resetMock, vscodeMock } from './vscode-mock';
 
 function setup() {

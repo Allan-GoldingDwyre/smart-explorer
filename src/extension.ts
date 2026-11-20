@@ -6,12 +6,18 @@ import {
   computeMarkRange,
   diffLineFor,
   workspaceForFile,
-} from './focus';
-import { registerMcpServer } from './mcpServer';
-import { FOLLOWING_URI_SCHEME, SmartExplorerNode } from './SmartExplorerNode';
-import { SmartExplorerProvider } from './SmartExplorerProvider';
-import { WalkthroughController } from './walkthroughController';
-import { walkthroughFilePath, writeUiHeartbeat } from './walkthrough';
+} from './core/focus';
+import { registerMcpServer } from './mcp/mcpServer';
+import {
+  FOLLOWING_URI_SCHEME,
+  SmartExplorerNode,
+} from './view/SmartExplorerNode';
+import { SmartExplorerProvider } from './view/SmartExplorerProvider';
+import { WalkthroughController } from './walkthrough/walkthroughController';
+import {
+  walkthroughFilePath,
+  writeUiHeartbeat,
+} from './walkthrough/walkthrough';
 import {
   DiffRequest,
   FOLLOW_IDLE_MS,
@@ -26,7 +32,7 @@ import {
   workspacesDir,
   writeActive,
   writeFollow,
-} from './workspaceStore';
+} from './core/workspaceStore';
 
 export function activate(context: vscode.ExtensionContext) {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;

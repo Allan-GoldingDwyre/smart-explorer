@@ -13,7 +13,7 @@ import {
   walkthroughStartTool,
   walkthroughStepTool,
   walkthroughWaitTool,
-} from '../src/mcpTools';
+} from '../src/mcp/mcpTools';
 import {
   UI_ALIVE_MS,
   WALK_STALE_MS,
@@ -26,8 +26,8 @@ import {
   threadMessages,
   walkProgress,
   writeUiHeartbeat,
-} from '../src/walkthrough';
-import { readFollow } from '../src/workspaceStore';
+} from '../src/walkthrough/walkthrough';
+import { readFollow } from '../src/core/workspaceStore';
 
 const NOW = new Date('2026-11-20T10:00:00Z');
 

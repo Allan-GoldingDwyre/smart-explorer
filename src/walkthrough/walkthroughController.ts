@@ -18,7 +18,7 @@ import {
   threadMessages,
   walkProgress,
 } from './walkthrough';
-import { FocusRequest } from './workspaceStore';
+import { FocusRequest } from '../core/workspaceStore';
 
 export interface WalkthroughHooks {
   // Ouvre le fichier/diff de l'étape (surlignage, sélection dans l'arbre) et

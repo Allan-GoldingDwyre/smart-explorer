@@ -35,7 +35,7 @@ import {
   treeFiles,
   uniqueWorkspaceId,
   workspaceFilePath,
-} from '../src/workspaceStore';
+} from '../src/core/workspaceStore';
 
 function makeTempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-test-'));

@@ -6,8 +6,8 @@ import {
   normalizeFiles,
   normalizeTree,
   removeFilesFromTree,
-} from '../src/treeOps';
-import { flattenTreeFiles as listTreeFiles } from '../src/workspaceStore';
+} from '../src/core/treeOps';
+import { flattenTreeFiles as listTreeFiles } from '../src/core/workspaceStore';
 
 test('normalizeFiles : ./ retiré, doublons et vides ignorés', () => {
   assert.deepEqual(normalizeFiles(['./a.rs', 'a.rs', ' b\\c.rs ', '']), [

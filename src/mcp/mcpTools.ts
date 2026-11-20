@@ -28,14 +28,14 @@ import {
   treeFiles,
   uniqueWorkspaceId,
   workspaceFilePath,
-} from './workspaceStore';
+} from '../core/workspaceStore';
 import {
   addFilesToTree,
   countFolders,
   normalizeFiles,
   normalizeTree,
   removeFilesFromTree,
-} from './treeOps';
+} from '../core/treeOps';
 import {
   WalkEvent,
   WalkMode,
@@ -45,7 +45,7 @@ import {
   readWalkthrough,
   resetEvents,
   writeWalkthrough,
-} from './walkthrough';
+} from '../walkthrough/walkthrough';
 import {
   MAX_DIFF_LINES,
   MAX_RANGE_LINES,
@@ -53,8 +53,8 @@ import {
   isSafeRelPath,
   isSafeRev,
   workspaceForFile,
-} from './focus';
-import { FusionOptions, fuseTree } from './treeFusion';
+} from '../core/focus';
+import { FusionOptions, fuseTree } from '../core/treeFusion';
 
 export interface ToolEnv {
   // Racine du workspace VS Code (fsPath du 1er dossier ouvert).

@@ -14,7 +14,7 @@ import {
   DiffRequest,
   ensureProjectDir,
   projectDataDir,
-} from './workspaceStore';
+} from '../core/workspaceStore';
 
 export type WalkMode = 'flow' | 'changes' | 'review';
 

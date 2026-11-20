@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { FileTreeNode } from './types';
-import { VirtualDir, WorkspaceFile } from './workspaceStore';
+import { FileTreeNode } from '../core/types';
+import { VirtualDir, WorkspaceFile } from '../core/workspaceStore';
 
 // Schéma de l'URI de la ligne « Following agent » : la décoration orange du
 // panneau s'y accroche (voir extension.ts).

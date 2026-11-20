@@ -17,9 +17,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as path from 'path';
-import { TOOL_SPECS } from './mcpSpecs';
-import { ToolEnv } from './mcpTools';
-import { migrateLegacyStore } from './workspaceStore';
+import { TOOL_SPECS } from './mcp/mcpSpecs';
+import { ToolEnv } from './mcp/mcpTools';
+import { migrateLegacyStore } from './core/workspaceStore';
 
 function resolveRoot(): string {
   const argIdx = process.argv.indexOf('--root');

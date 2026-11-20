@@ -7,7 +7,7 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { readActive, workspaceFilePath } from '../src/workspaceStore';
+import { readActive, workspaceFilePath } from '../src/core/workspaceStore';
 
 const SERVER = path.join(__dirname, '..', '..', 'out', 'mcpStdio.js');
 const BUNDLE = path.join(

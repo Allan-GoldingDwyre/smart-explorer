@@ -1,7 +1,7 @@
 import './vscode-mock';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { truncate, TYPE_ICONS } from '../src/types';
+import { truncate, TYPE_ICONS } from '../src/core/types';
 
 test('truncate : court inchangé, long tronqué avec ellipse', () => {
   assert.equal(truncate('abc'), 'abc');

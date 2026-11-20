@@ -10,7 +10,7 @@ import {
   resolveLine,
   resolveRange,
   workspaceForFile,
-} from '../src/focus';
+} from '../src/core/focus';
 
 const code = ['a', 'fn start() {', 'b', 'c', 'fn start() {', 'd'].join('\n');
 

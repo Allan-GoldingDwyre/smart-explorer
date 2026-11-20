@@ -22,13 +22,13 @@ import {
   setActiveWorkspaceTool,
   setInstructionsTool,
   syncWorkspaceTool,
-} from '../src/mcpTools';
+} from '../src/mcp/mcpTools';
 import {
   loadWorkspace,
   readActive,
   readFollow,
   writeFollow,
-} from '../src/workspaceStore';
+} from '../src/core/workspaceStore';
 
 function makeTempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-mcp-'));

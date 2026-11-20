@@ -5,13 +5,13 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SmartExplorerProvider } from '../src/SmartExplorerProvider';
-import { SmartExplorerNode } from '../src/SmartExplorerNode';
+import { SmartExplorerProvider } from '../src/view/SmartExplorerProvider';
+import { SmartExplorerNode } from '../src/view/SmartExplorerNode';
 import {
   appendEvent,
   readWalkthrough,
   writeWalkthrough,
-} from '../src/walkthrough';
+} from '../src/walkthrough/walkthrough';
 import {
   VirtualDir,
   WorkspaceFile,
@@ -19,7 +19,7 @@ import {
   saveWorkspace,
   writeFollow,
   writeActive,
-} from '../src/workspaceStore';
+} from '../src/core/workspaceStore';
 import {
   executedCommands,
   inputQueue,
