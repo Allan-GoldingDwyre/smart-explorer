@@ -1,50 +1,64 @@
 import * as vscode from 'vscode';
-import { loginGithub, logoutGithub, logoutLinear, setupLinear } from './auth';
-import { startMcpServer } from './mcpServer';
+import { registerMcpServer } from './mcpServer';
 import { SmartExplorerNode } from './SmartExplorerNode';
 import { SmartExplorerProvider } from './SmartExplorerProvider';
+import {
+  listOrphanProjects,
+  migrateLegacyStore,
+  projectDataDir,
+  removeProjectData,
+  workspacesDir,
+} from './workspaceStore';
 
 export function activate(context: vscode.ExtensionContext) {
-  const provider = new SmartExplorerProvider(context);
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (root) {
+    // Anciennes données (dans le projet) -> dossier de données utilisateur.
+    try {
+      migrateLegacyStore(root);
+    } catch {
+      // migration best-effort : le store reste utilisable
+    }
+  }
 
+  const provider = new SmartExplorerProvider();
   const treeView = vscode.window.createTreeView('smartExplorerView', {
     treeDataProvider: provider,
     showCollapseAll: true,
   });
-  provider.setTreeView(treeView);
 
-  // Serveur MCP hébergé par l'extension (VS Code >= 1.99), démarré à
-  // l'activation. L'agent (client MCP) pilote les workspaces via les tools ;
-  // l'extension re-render la vue quand les YAML changent.
-  startMcpServer(context, {
-    revealFile: (relPath, where) => provider.revealFile(relPath, where),
-    setActiveWorkspace: (id) => provider.setActiveWorkspace(id),
-    getActiveWorkspace: () => provider.getActiveWorkspace(),
-  });
+  // Serveur MCP déclaré à VS Code (lancé par VS Code, exposé au chat). Les
+  // clients écrivent les YAML ; l'extension re-render via le watcher.
+  registerMcpServer(context);
 
-  // Re-render quand un agent écrit/met à jour un YAML de workspace.
-  const watcher = vscode.workspace.createFileSystemWatcher(
-    '**/.smart-explorer/**',
-  );
-  watcher.onDidChange(() => {
+  const reload = () => {
     provider.reloadFromDisk();
     provider.refresh();
-  });
-  watcher.onDidCreate(() => {
-    provider.reloadFromDisk();
-    provider.refresh();
-  });
-  watcher.onDidDelete(() => {
-    provider.reloadFromDisk();
-    provider.refresh();
-  });
+  };
+  const disposables: vscode.Disposable[] = [];
+  if (root) {
+    // Les données vivent hors du projet : on surveille leur dossier.
+    const wsDir = vscode.Uri.file(workspacesDir(root));
+    const projectDir = vscode.Uri.file(projectDataDir(root));
+    for (const watcher of [
+      vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(wsDir, '*.yaml'),
+      ),
+      vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(projectDir, 'active'),
+      ),
+    ]) {
+      watcher.onDidChange(reload);
+      watcher.onDidCreate(reload);
+      watcher.onDidDelete(reload);
+      disposables.push(watcher);
+    }
+  }
 
   context.subscriptions.push(
     treeView,
-    watcher,
-    vscode.commands.registerCommand('smartExplorer.addWorkspace', () => {
-      provider.addWorkspace();
-    }),
+    ...disposables,
+    vscode.commands.registerCommand('smartExplorer.refresh', reload),
     vscode.commands.registerCommand('smartExplorer.renameWorkspace', () => {
       provider.renameWorkspace(
         treeView.selection[0] as SmartExplorerNode | undefined,
@@ -52,51 +66,33 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand(
       'smartExplorer.deleteWorkspace',
-      (node: SmartExplorerNode) => {
-        provider.deleteWorkspace(node);
-      },
+      (node: SmartExplorerNode) => provider.deleteWorkspace(node),
     ),
     vscode.commands.registerCommand(
       'smartExplorer.addInstruction',
-      (node: SmartExplorerNode) => {
-        provider.addInstruction(node);
-      },
-    ),
-    vscode.commands.registerCommand(
-      'smartExplorer.refreshWorkspace',
-      (node: SmartExplorerNode) => {
-        provider.refreshWorkspace(node);
-      },
+      (node: SmartExplorerNode) => provider.addInstruction(node),
     ),
     vscode.commands.registerCommand(
       'smartExplorer.revealInExplorer',
-      (node: SmartExplorerNode) => {
-        provider.revealInExplorer(node);
-      },
+      (node: SmartExplorerNode) => provider.revealInExplorer(node),
     ),
-    vscode.commands.registerCommand('smartExplorer.loginGithub', () => {
-      loginGithub();
-    }),
-    vscode.commands.registerCommand('smartExplorer.logoutGithub', () => {
-      logoutGithub();
-    }),
-    vscode.authentication.onDidChangeSessions((e) => {
-      if (e.provider.id === 'github') {
-        provider.refresh();
+    vscode.commands.registerCommand('smartExplorer.cleanOrphans', async () => {
+      const orphans = listOrphanProjects();
+      if (orphans.length === 0) {
+        vscode.window.showInformationMessage(
+          'Smart Explorer : aucune donnée orpheline.',
+        );
+        return;
       }
-    }),
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('smartExplorer')) {
-        provider.refresh();
+      const count = orphans.reduce((n, o) => n + o.workspaces, 0);
+      const confirm = await vscode.window.showWarningMessage(
+        `Supprimer les données de ${orphans.length} projet(s) introuvable(s) (${count} workspace(s)) ?`,
+        { modal: true, detail: orphans.map((o) => o.root ?? o.dir).join('\n') },
+        'Supprimer',
+      );
+      if (confirm === 'Supprimer') {
+        orphans.forEach((o) => removeProjectData(o.dir));
       }
-    }),
-    vscode.commands.registerCommand('smartExplorer.setupLinear', async () => {
-      await setupLinear(context);
-      provider.refresh();
-    }),
-    vscode.commands.registerCommand('smartExplorer.logoutLinear', async () => {
-      await logoutLinear(context);
-      provider.refresh();
     }),
   );
 }

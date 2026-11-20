@@ -4,13 +4,13 @@
   "description": "A smarter file explorer panel for VS Code",
   "version": "0.1.0",
   "engines": {
-    "vscode": "^1.99.0"
+    "vscode": "^1.101.0"
   },
   "categories": [
     "Other"
   ],
   "activationEvents": [],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/Allan-GoldingDwyre/smart-explorer.git"
@@ -40,22 +40,14 @@
     "viewsWelcome": [
       {
         "view": "smartExplorerView",
-        "contents": "No workspace in this project yet.\n\n[Add Workspace](command:smartExplorer.addWorkspace)"
+        "contents": "Aucun workspace pour ce projet.\n\nDemande à ton agent (serveur MCP Smart Explorer) de créer un workspace pour une issue ou une PR : create_workspace puis build_tree."
       }
     ],
     "commands": [
       {
-        "command": "smartExplorer.addWorkspace",
-        "title": "Add Workspace",
-        "icon": "$(add)"
-      },
-      {
-        "command": "smartExplorer.setupLinear",
-        "title": "Smart Explorer: Setup Linear API Key"
-      },
-      {
-        "command": "smartExplorer.logoutLinear",
-        "title": "Smart Explorer: Logout from Linear"
+        "command": "smartExplorer.refresh",
+        "title": "Smart Explorer: Refresh",
+        "icon": "$(refresh)"
       },
       {
         "command": "smartExplorer.renameWorkspace",
@@ -73,14 +65,13 @@
         "icon": "$(comment-add)"
       },
       {
-        "command": "smartExplorer.refreshWorkspace",
-        "title": "Smart Explorer: Refresh Workspace",
-        "icon": "$(refresh)"
-      },
-      {
         "command": "smartExplorer.revealInExplorer",
         "title": "Smart Explorer: Reveal in Explorer",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "smartExplorer.cleanOrphans",
+        "title": "Smart Explorer: Clean Orphaned Data"
       }
     ],
     "keybindings": [
@@ -91,21 +82,10 @@
         "when": "view == smartExplorerView && focusedView == smartExplorerView && viewItem =~ /^workspace-/ && !inputFocus"
       }
     ],
-    "configuration": {
-      "title": "Smart Explorer",
-      "properties": {
-        "smartExplorer.configureLinearKey": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "[Configurer la clé API Linear](command:smartExplorer.setupLinear)\n\nClique sur le lien ci-dessus : une boîte de dialogue sécurisée s'ouvre et la clé est stockée **chiffrée** (SecretStorage). Ne saisis jamais ta clé dans ce champ — elle ne doit pas être écrite en clair dans les settings.",
-          "order": 1
-        }
-      }
-    },
     "menus": {
       "view/title": [
         {
-          "command": "smartExplorer.addWorkspace",
+          "command": "smartExplorer.refresh",
           "when": "view == smartExplorerView",
           "group": "navigation@1"
         }
@@ -117,9 +97,9 @@
           "group": "inline"
         },
         {
-          "command": "smartExplorer.refreshWorkspace",
+          "command": "smartExplorer.deleteWorkspace",
           "when": "view == smartExplorerView && viewItem =~ /^workspace-/",
-          "group": "inline"
+          "group": "inline@1"
         },
         {
           "command": "smartExplorer.renameWorkspace",
@@ -137,13 +117,20 @@
           "group": "2_danger@1"
         }
       ]
-    }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "smartExplorer.mcp",
+        "label": "Smart Explorer"
+      }
+    ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle && npm run build:mcp",
     "compile": "tsc -p ./",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "compile:test": "tsc -p tsconfig.test.json",
-    "test": "npm run compile:test && node --test out-test/test/",
+    "test": "npm run compile && npm run compile:test && npm run build:mcp && node --test out-test/test/",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "build:mcp": "esbuild src/mcpStdio.ts --bundle --platform=node --target=node18 --outfile=dist/smart-explorer-mcp.js && chmod +x dist/smart-explorer-mcp.js",
@@ -151,7 +138,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.x",
-    "@types/vscode": "^1.99.0",
+    "@types/vscode": "^1.101.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "@vscode/vsce": "^4.1.1",
