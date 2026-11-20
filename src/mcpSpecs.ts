@@ -14,6 +14,11 @@ import {
   revealFileTool,
   setActiveWorkspaceTool,
   stopFollowingTool,
+  walkthroughEndTool,
+  walkthroughReplyTool,
+  walkthroughStartTool,
+  walkthroughStepTool,
+  walkthroughWaitTool,
   setInstructionsTool,
   syncWorkspaceTool,
   updateFilesTool,
@@ -199,6 +204,58 @@ export const TOOL_SPECS: ToolSpec[] = [
       workspace_id: workspaceId.optional(),
     },
     run: (env, args) => revealFileTool(env, args),
+  },
+  {
+    name: 'walkthrough_start',
+    description:
+      "Lance une visite guidée DANS VS CODE (explications en commentaires au-dessus des lignes, l'utilisateur répond dans le fil) : tout se passe dans l'éditeur, pas dans le terminal. Donne `mode` (flow | changes | review), un `title` et le plan (`outline` : titres des étapes prévues, pour afficher « étape 2/6 »). Si `ui` vaut false, VS Code n'est pas ouvert sur le projet : fais la visite dans le terminal. Ensuite : pousse les étapes avec walkthrough_step, puis attends l'utilisateur avec walkthrough_wait.",
+    shape: {
+      mode: z.enum(['flow', 'changes', 'review']),
+      title: z.string().optional(),
+      workspace_id: workspaceId.optional(),
+      outline: strArray.optional().describe('Titres des étapes prévues'),
+    },
+    run: (env, args) => walkthroughStartTool(env, args),
+  },
+  {
+    name: 'walkthrough_step',
+    description:
+      "Pousse UNE étape de la visite : elle s'affiche dans VS Code dès l'envoi (la première s'ouvre aussitôt). Enchaîne les appels sans attendre : l'utilisateur lit l'étape 1 pendant que tu génères les suivantes ; « Continuer » est géré par VS Code. `text` = l'explication, 1 à 2 phrases (~40 mots), sans décrire ce que l'écran montre. Zone : mêmes règles que reveal_file (pas de `line` = fichier entier ; `line` + `match` = point précis ; `line` + `end_line` = petite plage ≤ 25 lignes ; `diff` = rare, petit changement). `last: true` sur la dernière étape. La réponse contient `pending_comments` : si l'utilisateur a écrit pendant ce temps, réponds-y tout de suite avec walkthrough_reply.",
+    shape: {
+      title: z.string().describe("Titre court de l'étape"),
+      text: z.string().describe('Explication concise (markdown)'),
+      path: z.string(),
+      line: z.number().int().min(1).optional(),
+      end_line: z.number().int().min(1).optional(),
+      match: z.string().optional(),
+      diff: diffSchema,
+      last: z.boolean().optional().describe('Dernière étape de la visite'),
+    },
+    run: (env, args) => walkthroughStepTool(env, args),
+  },
+  {
+    name: 'walkthrough_reply',
+    description:
+      "Répond dans un fil de commentaire de VS Code. `thread` = celui de l'événement reçu (walkthrough_wait) ou de pending_comments (ex. step-2, user-5). Réponse courte et directe.",
+    shape: {
+      thread: z.string().describe('Ex. step-2 ou user-5'),
+      text: z.string(),
+    },
+    run: (env, args) => walkthroughReplyTool(env, args),
+  },
+  {
+    name: 'walkthrough_wait',
+    description:
+      "Attend une action de l'utilisateur dans VS Code (appel BLOQUANT) : un commentaire (réponds avec walkthrough_reply puis rappelle walkthrough_wait) ou l'arrêt (`status: ended` : termine). Continuer/Précédent sont gérés par VS Code et ne te réveillent pas. Rend la main avec `idle: true` après `timeout_s` (défaut 300, max 1800) : rappelle-le tant que la visite continue, sans rien écrire dans le terminal.",
+    shape: { timeout_s: z.number().int().min(1).max(1800).optional() },
+    run: (env, args) => walkthroughWaitTool(env, args),
+  },
+  {
+    name: 'walkthrough_end',
+    description:
+      'Termine la visite guidée : les fils de commentaire et la ligne « Following agent » disparaissent. À appeler à la fin (ou sur `status: ended`).',
+    shape: {},
+    run: (env) => walkthroughEndTool(env),
   },
   {
     name: 'stop_following',

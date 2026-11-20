@@ -37,6 +37,16 @@ import {
   removeFilesFromTree,
 } from './treeOps';
 import {
+  WalkEvent,
+  WalkMode,
+  WalkSession,
+  isUiAlive,
+  readEvents,
+  readWalkthrough,
+  resetEvents,
+  writeWalkthrough,
+} from './walkthrough';
+import {
   MAX_DIFF_LINES,
   MAX_RANGE_LINES,
   clampEndLine,
@@ -50,6 +60,8 @@ export interface ToolEnv {
   // Racine du workspace VS Code (fsPath du 1er dossier ouvert).
   root: string;
   now?: () => Date;
+  // Attente (walkthrough_wait) : remplaçable dans les tests.
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function nowIso(env: ToolEnv): string {
@@ -334,6 +346,7 @@ export async function stopFollowingTool(
   const now = env.now ? env.now() : new Date();
   const current = readFollow(env.root, now);
   writeFollow(env.root, { status: 'ended' }, now);
+  endSession(env, now);
   return { ok: true, was: current?.status ?? 'none' };
 }
 
@@ -775,6 +788,325 @@ export async function revealFileTool(
     exists: fs.existsSync(absolute),
     ...(prepared.notes.length ? { notes: prepared.notes } : {}),
   };
+}
+
+// --- Visite guidée dans VS Code (étapes poussées une à une, fils de commentaire) ---
+
+const WAIT_DEFAULT_S = 300;
+const WAIT_MAX_S = 1800;
+const WAIT_POLL_MS = 400;
+// Dernier événement utilisateur consommé, par visite (mémoire du processus).
+const consumedEvents = new Map<string, number>();
+
+const THREAD_RE = /^(step|user)-\d+$/;
+
+function activeSession(env: ToolEnv): WalkSession | undefined {
+  const session = readWalkthrough(env.root);
+  return session && session.status === 'active' ? session : undefined;
+}
+
+function requireSession(env: ToolEnv): WalkSession {
+  const session = activeSession(env);
+  if (!session) {
+    err('aucune visite en cours : appelle walkthrough_start');
+  }
+  return session;
+}
+
+function touch(session: WalkSession, env: ToolEnv): void {
+  session.updated_at = (env.now ? env.now() : new Date()).toISOString();
+  writeWalkthrough(env.root, session);
+}
+
+// Commentaires de l'utilisateur pas encore consommés (aperçu, sans consommer) :
+// l'agent peut y répondre sans attendre la fin de sa génération.
+function pendingComments(env: ToolEnv, session: WalkSession) {
+  const after = consumedEvents.get(session.id) ?? 0;
+  return readEvents(env.root, after)
+    .filter((e) => e.session === session.id && e.type === 'comment')
+    .slice(0, 5)
+    .map((e) => ({
+      seq: e.seq,
+      step: e.step,
+      thread: e.thread,
+      text: e.text,
+      path: e.path,
+      line: e.line,
+    }));
+}
+
+// L'utilisateur a-t-il arrêté la visite dans VS Code (événement stop pas encore
+// consommé) ? L'agent doit alors cesser de pousser des étapes.
+function userStopped(env: ToolEnv, session: WalkSession): boolean {
+  const after = consumedEvents.get(session.id) ?? 0;
+  return readEvents(env.root, after).some(
+    (e) => e.session === session.id && e.type === 'stop',
+  );
+}
+
+function endSession(env: ToolEnv, now: Date): void {
+  const session = readWalkthrough(env.root);
+  if (session && session.status === 'active') {
+    session.status = 'ended';
+    session.updated_at = now.toISOString();
+    writeWalkthrough(env.root, session);
+  }
+}
+
+// Lance une visite : la suite (étapes, réponses) se passe dans VS Code. Si
+// l'extension n'est pas active sur ce projet, on le dit (ui: false) pour que
+// l'agent fasse la visite dans le terminal au lieu d'attendre dans le vide.
+export async function walkthroughStartTool(
+  env: ToolEnv,
+  args: {
+    mode: WalkMode;
+    title?: string;
+    workspace_id?: string;
+    outline?: string[];
+  },
+): Promise<{ ok: boolean; ui: boolean; session?: string; note?: string }> {
+  const now = env.now ? env.now() : new Date();
+  if (!isUiAlive(env.root, now)) {
+    return {
+      ok: false,
+      ui: false,
+      note: "VS Code n'est pas ouvert sur ce projet (extension Smart Explorer inactive) : fais la visite dans le terminal.",
+    };
+  }
+  if (!['flow', 'changes', 'review'].includes(args.mode)) {
+    err('mode invalide : flow, changes ou review');
+  }
+  const workspaceId = args.workspace_id ?? readActive(env.root);
+  if (args.workspace_id) {
+    requireWorkspace(env, args.workspace_id);
+    writeActive(env.root, args.workspace_id);
+  }
+  const outline = (args.outline ?? [])
+    .filter((t): t is string => typeof t === 'string' && !!t.trim())
+    .map((t) => t.trim());
+  const id = `wt-${now.getTime().toString(36)}`;
+  resetEvents(env.root);
+  consumedEvents.delete(id);
+  writeWalkthrough(env.root, {
+    id,
+    mode: args.mode,
+    title: args.title,
+    workspace_id: workspaceId,
+    outline,
+    steps: [],
+    complete: false,
+    messages: [],
+    status: 'active',
+    updated_at: now.toISOString(),
+  });
+  return { ok: true, ui: true, session: id };
+}
+
+// Pousse l'étape suivante (affichée dans VS Code dès son arrivée). L'agent
+// peut enchaîner les appels pendant que l'utilisateur lit l'étape 1.
+export async function walkthroughStepTool(
+  env: ToolEnv,
+  args: {
+    title: string;
+    text: string;
+    path: string;
+    line?: number;
+    end_line?: number;
+    match?: string;
+    diff?: DiffRequest;
+    last?: boolean;
+  },
+): Promise<{
+  ok: true;
+  n: number;
+  notes?: string[];
+  stopped?: boolean;
+  note?: string;
+  pending_comments: ReturnType<typeof pendingComments>;
+}> {
+  const session = requireSession(env);
+  if (!args.text?.trim() || !args.title?.trim()) {
+    err('title et text requis');
+  }
+  if (!args.path) {
+    err('path requis');
+  }
+  const prepared = await prepareFocus(env, {
+    path: args.path,
+    line: args.line,
+    end_line: args.end_line,
+    match: args.match,
+    diff: args.diff,
+  });
+  const t = prepared.target;
+  const n = session.steps.length + 1;
+  session.steps.push({
+    n,
+    title: args.title.trim(),
+    text: args.text.trim(),
+    path: t.path.replace(/\\/g, '/').replace(/^\.\//, ''),
+    line: t.line,
+    end_line: t.end_line,
+    match: t.match,
+    diff: t.diff,
+    at: (env.now ? env.now() : new Date()).toISOString(),
+  });
+  if (args.last === true) {
+    session.complete = true;
+  }
+  touch(session, env);
+  return {
+    ok: true,
+    n,
+    ...(prepared.notes.length ? { notes: prepared.notes } : {}),
+    ...(userStopped(env, session)
+      ? {
+          stopped: true,
+          note: "L'utilisateur a arrêté la visite : arrête de pousser des étapes et appelle walkthrough_end.",
+        }
+      : {}),
+    pending_comments: pendingComments(env, session),
+  };
+}
+
+// Répond dans un fil de commentaire (`thread` vient d'un événement de
+// walkthrough_wait ou de pending_comments).
+export async function walkthroughReplyTool(
+  env: ToolEnv,
+  args: { thread: string; text: string },
+): Promise<{
+  ok: true;
+  stopped?: boolean;
+  pending_comments: ReturnType<typeof pendingComments>;
+}> {
+  const session = requireSession(env);
+  if (!THREAD_RE.test(args.thread ?? '')) {
+    err(
+      'thread invalide (ex. step-2 ou user-5, tel que reçu dans l’événement)',
+    );
+  }
+  if (!args.text?.trim()) {
+    err('text requis');
+  }
+  session.messages.push({
+    thread: args.thread,
+    text: args.text.trim(),
+    at: (env.now ? env.now() : new Date()).toISOString(),
+  });
+  touch(session, env);
+  return {
+    ok: true,
+    ...(userStopped(env, session) ? { stopped: true } : {}),
+    pending_comments: pendingComments(env, session),
+  };
+}
+
+// Attend une action de l'utilisateur dans VS Code : un commentaire (à qui tu
+// réponds avec walkthrough_reply) ou l'arrêt. Continuer/Précédent sont gérés
+// par l'extension seule : ils ne te réveillent pas. Bloque jusqu'à
+// `timeout_s` (défaut 300 s, max 1800), puis rend la main avec idle: true.
+export async function walkthroughWaitTool(
+  env: ToolEnv,
+  args: { timeout_s?: number },
+): Promise<{
+  status: 'active' | 'ended';
+  events: WalkEvent[];
+  idle?: boolean;
+  current_step: number;
+  steps_ready: number;
+  complete: boolean;
+}> {
+  const first = readWalkthrough(env.root);
+  if (!first) {
+    err('aucune visite : appelle walkthrough_start');
+  }
+  const id = first.id;
+  const seconds = Math.min(
+    Math.max(args.timeout_s ?? WAIT_DEFAULT_S, 1),
+    WAIT_MAX_S,
+  );
+  const rounds = Math.ceil((seconds * 1000) / WAIT_POLL_MS);
+  const sleep =
+    env.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let currentStep = 1;
+  // Preuve de vie pendant l'attente : sans écriture du serveur depuis 45 min,
+  // l'interface considère la visite comme abandonnée (agent interrompu).
+  const touchEvery = Math.round(60_000 / WAIT_POLL_MS);
+  for (let i = 0; i <= rounds; i++) {
+    const session = readWalkthrough(env.root);
+    if (
+      session &&
+      session.id === id &&
+      session.status === 'active' &&
+      i % touchEvery === 0
+    ) {
+      touch(session, env);
+    }
+    if (!session || session.id !== id) {
+      return {
+        status: 'ended',
+        events: [],
+        current_step: currentStep,
+        steps_ready: first.steps.length,
+        complete: true,
+      };
+    }
+    const after = consumedEvents.get(id) ?? 0;
+    const fresh = readEvents(env.root, after).filter((e) => e.session === id);
+    if (fresh.length) {
+      consumedEvents.set(id, fresh[fresh.length - 1].seq);
+      currentStep = fresh[fresh.length - 1].step;
+      const relevant = fresh.filter(
+        (e) => e.type === 'comment' || e.type === 'stop',
+      );
+      if (relevant.length) {
+        const stopped = relevant.some((e) => e.type === 'stop');
+        if (stopped) {
+          endSession(env, env.now ? env.now() : new Date());
+        }
+        return {
+          status: stopped ? 'ended' : 'active',
+          events: relevant,
+          current_step: currentStep,
+          steps_ready: session.steps.length,
+          complete: session.complete,
+        };
+      }
+    }
+    if (session.status === 'ended') {
+      return {
+        status: 'ended',
+        events: [],
+        current_step: currentStep,
+        steps_ready: session.steps.length,
+        complete: session.complete,
+      };
+    }
+    if (i < rounds) {
+      await sleep(WAIT_POLL_MS);
+    }
+  }
+  const last = readWalkthrough(env.root);
+  return {
+    status: 'active',
+    events: [],
+    idle: true,
+    current_step: currentStep,
+    steps_ready: last?.steps.length ?? 0,
+    complete: last?.complete ?? false,
+  };
+}
+
+// Termine la visite : les fils disparaissent dans VS Code.
+export async function walkthroughEndTool(
+  env: ToolEnv,
+): Promise<{ ok: true; was: string }> {
+  const now = env.now ? env.now() : new Date();
+  const session = readWalkthrough(env.root);
+  const was = session?.status ?? 'none';
+  endSession(env, now);
+  writeFollow(env.root, { status: 'ended' }, now);
+  return { ok: true, was };
 }
 
 export async function setActiveWorkspaceTool(

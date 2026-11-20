@@ -183,7 +183,7 @@ export function writeFollow(
 
 // Crée le dossier du projet et y note le chemin d'origine (sert à repérer
 // les données orphelines quand le projet n'existe plus).
-function ensureProjectDir(root: string): void {
+export function ensureProjectDir(root: string): void {
   const dir = projectDataDir(root);
   fs.mkdirSync(path.join(dir, 'workspaces'), { recursive: true });
   const meta = path.join(dir, 'project.json');

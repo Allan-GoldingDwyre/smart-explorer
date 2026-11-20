@@ -90,7 +90,7 @@ async function handshake(rpc: Rpc): Promise<void> {
   rpc.send('notifications/initialized');
 }
 
-test('serveur stdio : handshake + tools/list (13 tools) + tools/call', async () => {
+test('serveur stdio : handshake + tools/list (18 tools) + tools/call', async () => {
   const root = makeTempRoot();
   const rpc = spawnServer(root);
   try {
@@ -112,6 +112,11 @@ test('serveur stdio : handshake + tools/list (13 tools) + tools/call', async () 
       'stop_following',
       'sync_workspace',
       'update_files',
+      'walkthrough_end',
+      'walkthrough_reply',
+      'walkthrough_start',
+      'walkthrough_step',
+      'walkthrough_wait',
     ]);
 
     // tools/call : create_workspace puis list_workspaces
@@ -169,7 +174,7 @@ test(
     try {
       await handshake(rpc);
       const list = await rpc.send('tools/list');
-      assert.equal(list.result.tools.length, 13);
+      assert.equal(list.result.tools.length, 18);
     } finally {
       rpc.close();
     }
