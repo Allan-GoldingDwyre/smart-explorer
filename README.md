@@ -80,7 +80,7 @@ Le skill (`skills/smart-explorer/SKILL.md`) décrit quand se charger et le workf
 
 1. Lire la source (issue/PR) soi-même (`gh`, web) : le serveur ne la récupère pas.
 2. `create_workspace` avec l'URL/texte + `instructions` = le besoin de l'utilisateur (ex. « relire la migration serde »).
-3. `build_tree` avec `files` (les chemins pertinents) : le serveur reprend l'arborescence réelle et la **fusionne** — les fichiers des petits dossiers (< `min_folder_files`, défaut 3) remontent au parent, jusqu'à `max_loose_files` (défaut 12) fichiers en vrac ; les chaînes de dossiers vides sont sautées (`back/a/b/c/x` → `back/c/x`) et le préfixe commun est retiré. Les vrais fichiers ne bougent jamais. Alternative : `tree` pour décider soi-même des dossiers. `update_files` ajoute/retire des fichiers (la fusion est rejouée).
+3. `build_tree` avec `files` (les chemins pertinents) : le serveur reprend l'arborescence réelle et la **fusionne** — les fichiers des petits dossiers (< `min_folder_files`, défaut 3) remontent au parent, jusqu'à `max_loose_files` (défaut 12) fichiers en vrac ; les dossiers intermédiaires sont absorbés : un dossier sans fichier propre et avec un seul sous-dossier le prend en charge et garde son nom (`apps/backend/src/backend/internal/…` → `src/…`, `back/a/b/c/x` → `back/x`). Les vrais fichiers ne bougent jamais. Alternative : `tree` pour décider soi-même des dossiers. `update_files` ajoute/retire des fichiers (la fusion est rejouée).
 4. `set_active_workspace` pour basculer la vue sur cette tâche.
 5. Maintenance : `sync_workspace` (diff depuis `base_commit`) → `apply_sync` (applique le diff validé), `check_workspace_files` (fichiers introuvables + renames), `export_context` (contenu des fichiers, tronqué à `max_tokens`).
 

@@ -8,10 +8,13 @@
 //     fichiers est dissous dans son parent (les plus petits d'abord) ;
 //  2. on s'arrête quand le parent dépasserait `max_loose_files` fichiers en
 //     vrac (évite de fabriquer une longue liste plate) ;
-//  3. un dossier sans fichier propre et avec un seul sous-dossier est sauté :
-//     back/f1/f2/.../fN/x -> back/fN/x (on garde le haut de la chaîne et le
-//     dossier final) ;
-//  4. le préfixe commun à tous les fichiers est retiré de la racine.
+//  3. absorption : un dossier sans fichier propre et avec un seul sous-dossier
+//     absorbe ce sous-dossier (il garde son nom, prend ses fichiers et ses
+//     sous-dossiers) ; un dossier avec des fichiers dont l'unique sous-dossier
+//     est un simple conteneur (sans fichier) le fait disparaître. Valable aussi
+//     pour la racine :
+//       apps/backend/src/backend/internal/{x.py, services/s/y.py}
+//         -> src/{x.py, services/{y.py}}   et   tests/unit/t.py -> tests/{t.py}
 // Module pur (sans vscode, sans disque).
 import { normalizeFiles } from './treeOps';
 import type { VirtualDir } from './workspaceStore';
@@ -56,8 +59,8 @@ function buildTrie(files: string[]): Node {
   return root;
 }
 
-function fuse(node: Node, isRoot: boolean, min: number, max: number): Node {
-  node.dirs = node.dirs.map((d) => fuse(d, false, min, max));
+function fuse(node: Node, min: number, max: number): Node {
+  node.dirs = node.dirs.map((d) => fuse(d, min, max));
   // 1-2. dissolution des petits dossiers, les plus petits d'abord, tant que
   // le parent reste lisible.
   const small = node.dirs
@@ -69,13 +72,14 @@ function fuse(node: Node, isRoot: boolean, min: number, max: number): Node {
       node.dirs.splice(node.dirs.indexOf(d), 1);
     }
   }
-  // 3. chaîne de dossiers sans fichier : on saute les intermédiaires.
-  if (!isRoot && node.files.length === 0 && node.dirs.length === 1) {
-    let leaf = node.dirs[0];
-    while (leaf.files.length === 0 && leaf.dirs.length === 1) {
-      leaf = leaf.dirs[0];
-    }
-    node.dirs = [leaf];
+  // 3. absorption des dossiers intermédiaires (voir l'en-tête).
+  while (
+    node.dirs.length === 1 &&
+    (node.files.length === 0 || node.dirs[0].files.length === 0)
+  ) {
+    const child = node.dirs[0];
+    node.files = [...node.files, ...child.files];
+    node.dirs = child.dirs;
   }
   return node;
 }
@@ -105,10 +109,6 @@ export function fuseTree(
 ): VirtualDir {
   const min = Math.max(1, options.min_folder_files ?? DEFAULT_MIN_FOLDER_FILES);
   const max = Math.max(1, options.max_loose_files ?? DEFAULT_MAX_LOOSE_FILES);
-  let root = fuse(buildTrie(normalizeFiles(rawFiles)), true, min, max);
-  // 4. préfixe commun : la racine saute les dossiers uniques sans fichier.
-  while (root.files.length === 0 && root.dirs.length === 1) {
-    root = root.dirs[0];
-  }
+  const root = fuse(buildTrie(normalizeFiles(rawFiles)), min, max);
   return toVirtualDir(root, '.');
 }

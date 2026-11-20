@@ -34,9 +34,10 @@ n'existent pas : corrige-les).
 
 - Un dossier dont le sous-arbre contient **moins de `min_folder_files` fichiers** (défaut 3) est dissous : ses fichiers remontent au dossier parent.
 - On **s'arrête** quand le parent dépasserait `max_loose_files` fichiers en vrac (défaut 12) : pas de longue liste plate.
-- Un dossier sans fichier propre et avec un seul sous-dossier est sauté :
-  `back/a/b/c/x` devient `back/c/x`.
-- Le préfixe commun à tous les fichiers est retiré.
+- Un dossier sans fichier propre et avec un seul sous-dossier **absorbe** ce sous-dossier
+  (il garde son nom) : `back/a/b/c/x` devient `back/x`,
+  `apps/backend/src/backend/internal/{x, services/s/y}` devient `src/{x, services/{y}}`.
+  Les dossiers « conteneurs » sans fichier disparaissent, racine comprise.
 - Aucun fichier n'apparaît deux fois.
 
 ## Garder la main
