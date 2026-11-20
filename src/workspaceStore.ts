@@ -1,18 +1,24 @@
 // Store YAML des workspaces : état partagé entre l'extension (rendering)
-// et les tools MCP (agent). Un fichier par workspace :
-//   <root>/.smart-explorer/workspaces/<id>.yaml
+// et les tools MCP (agent). Les données sont de la métadonnée utilisateur : elles
+// vivent hors du projet, dans le dossier de données de l'utilisateur :
+//   <data home>/projects/<nom>-<hash du chemin>/workspaces/<id>.yaml
+//   <data home>/projects/<nom>-<hash du chemin>/active
+// <data home> = $SMART_EXPLORER_HOME, sinon $XDG_DATA_HOME/smart-explorer,
+// sinon ~/.local/share/smart-explorer (%APPDATA% sous Windows).
 // Ce module est volontairement sans dépendance à 'vscode' pour rester
 // testable sous plain Node.
 import { execFile } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import YAML from 'yaml';
 
 const execFileAsync = promisify(execFile);
 
-export const STORE_DIR = '.smart-explorer/workspaces';
+// Ancien emplacement (dans le projet), migré au démarrage.
+const LEGACY_DIR = '.smart-explorer';
 
 export type SourceType = 'issue' | 'pr' | 'text';
 export type Lifecycle = 'exploration' | 'issue' | 'branche' | 'pr' | 'mergée';
@@ -45,10 +51,155 @@ export interface WorkspaceFile {
   instructions?: string[];
   freshness?: Freshness;
   tree?: VirtualDir;
+  // Présent quand l'arbre a été construit par fusion à partir d'une liste de
+  // fichiers (options utilisées, rejouées par update_files/apply_sync). Absent :
+  // arbre défini tel quel par l'agent.
+  fusion?: { min_folder_files?: number; max_loose_files?: number };
+}
+
+export function dataHome(): string {
+  if (process.env.SMART_EXPLORER_HOME) {
+    return path.resolve(process.env.SMART_EXPLORER_HOME);
+  }
+  const base =
+    process.env.XDG_DATA_HOME ||
+    (process.platform === 'win32' ? process.env.APPDATA : undefined) ||
+    path.join(os.homedir(), '.local', 'share');
+  return path.join(base, 'smart-explorer');
+}
+
+function realPath(root: string): string {
+  try {
+    return fs.realpathSync(root);
+  } catch {
+    return path.resolve(root);
+  }
+}
+
+// Clé stable d'un projet : nom du dossier + hash de son chemin réel.
+export function projectKey(root: string): string {
+  const real = realPath(root);
+  const hash = createHash('sha1').update(real).digest('hex').slice(0, 8);
+  return `${slugify(path.basename(real))}-${hash}`;
+}
+
+export function projectDataDir(root: string): string {
+  return path.join(dataHome(), 'projects', projectKey(root));
 }
 
 export function workspacesDir(root: string): string {
-  return path.join(root, STORE_DIR);
+  return path.join(projectDataDir(root), 'workspaces');
+}
+
+export function activeFilePath(root: string): string {
+  return path.join(projectDataDir(root), 'active');
+}
+
+export function readActive(root: string): string | undefined {
+  try {
+    return fs.readFileSync(activeFilePath(root), 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeActive(root: string, id: string): void {
+  ensureProjectDir(root);
+  fs.writeFileSync(activeFilePath(root), id);
+}
+
+// Crée le dossier du projet et y note le chemin d'origine (sert à repérer
+// les données orphelines quand le projet n'existe plus).
+function ensureProjectDir(root: string): void {
+  const dir = projectDataDir(root);
+  fs.mkdirSync(path.join(dir, 'workspaces'), { recursive: true });
+  const meta = path.join(dir, 'project.json');
+  if (!fs.existsSync(meta)) {
+    fs.writeFileSync(meta, JSON.stringify({ root: realPath(root) }));
+  }
+}
+
+// Déplace l'ancien store `<root>/.smart-explorer/` vers le dossier de
+// données. Retourne le nombre de workspaces migrés.
+export function migrateLegacyStore(root: string): number {
+  const legacy = path.join(root, LEGACY_DIR);
+  const legacyWs = path.join(legacy, 'workspaces');
+  let moved = 0;
+  if (fs.existsSync(legacyWs)) {
+    ensureProjectDir(root);
+    for (const f of fs
+      .readdirSync(legacyWs)
+      .filter((n) => n.endsWith('.yaml'))) {
+      const dest = path.join(workspacesDir(root), f);
+      if (!fs.existsSync(dest)) {
+        fs.copyFileSync(path.join(legacyWs, f), dest);
+        moved++;
+      }
+      fs.unlinkSync(path.join(legacyWs, f));
+    }
+  }
+  const legacyActive = path.join(legacy, 'active');
+  if (fs.existsSync(legacyActive)) {
+    if (!readActive(root)) {
+      ensureProjectDir(root);
+      fs.copyFileSync(legacyActive, activeFilePath(root));
+    }
+    fs.unlinkSync(legacyActive);
+  }
+  for (const dir of [legacyWs, legacy]) {
+    try {
+      fs.rmdirSync(dir); // seulement s'il est vide
+    } catch {
+      // absent ou non vide : on n'y touche pas
+    }
+  }
+  return moved;
+}
+
+export interface ProjectData {
+  dir: string;
+  root?: string;
+  workspaces: number;
+}
+
+// Dossiers de données de tous les projets connus.
+export function listProjectData(): ProjectData[] {
+  const base = path.join(dataHome(), 'projects');
+  if (!fs.existsSync(base)) {
+    return [];
+  }
+  return fs
+    .readdirSync(base)
+    .map((name) => path.join(base, name))
+    .filter((dir) => fs.statSync(dir).isDirectory())
+    .map((dir) => {
+      let root: string | undefined;
+      try {
+        root = JSON.parse(
+          fs.readFileSync(path.join(dir, 'project.json'), 'utf8'),
+        ).root;
+      } catch {
+        root = undefined;
+      }
+      const wsDir = path.join(dir, 'workspaces');
+      const workspaces = fs.existsSync(wsDir)
+        ? fs.readdirSync(wsDir).filter((f) => f.endsWith('.yaml')).length
+        : 0;
+      return { dir, root, workspaces };
+    });
+}
+
+// Projets dont le dossier d'origine n'existe plus.
+export function listOrphanProjects(): ProjectData[] {
+  return listProjectData().filter((p) => !p.root || !fs.existsSync(p.root));
+}
+
+export function removeProjectData(dir: string): void {
+  const base = path.join(dataHome(), 'projects') + path.sep;
+  if (!path.resolve(dir).startsWith(base)) {
+    throw new Error(`Refus de supprimer hors du dossier de données : ${dir}`);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 export function workspaceFilePath(root: string, id: string): string {
@@ -116,8 +267,7 @@ export function listWorkspaces(root: string): WorkspaceFile[] {
 }
 
 export function saveWorkspace(root: string, ws: WorkspaceFile): void {
-  const dir = workspacesDir(root);
-  fs.mkdirSync(dir, { recursive: true });
+  ensureProjectDir(root);
   fs.writeFileSync(workspaceFilePath(root, ws.id), serializeWorkspaceYaml(ws));
 }
 
@@ -174,6 +324,37 @@ export function computeFileHashes(
 }
 
 // Aplatit l'arbre virtuel en liste de chemins de fichiers.
+// Retire les fichiers en double d'un arbre : un fichier n'apparaît qu'une
+// fois, dans son dossier le plus profond (puis premier dans l'ordre). Les
+// dossiers qui se retrouvent vides sont supprimés.
+export function dedupeTree(dir: VirtualDir): VirtualDir {
+  return dedupeInto(dir, new Set());
+}
+
+function dedupeInto(dir: VirtualDir, seen: Set<string>): VirtualDir {
+  const out: VirtualDir = { ...dir };
+  const dirs = (dir.dirs ?? [])
+    .map((sub) => dedupeInto(sub, seen))
+    .filter((sub) => (sub.files?.length ?? 0) + (sub.dirs?.length ?? 0) > 0);
+  const files = (dir.files ?? []).filter((f) => {
+    const key = f.replace(/^\.\//, '');
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+  delete out.files;
+  delete out.dirs;
+  if (files.length) {
+    out.files = files;
+  }
+  if (dirs.length) {
+    out.dirs = dirs;
+  }
+  return out;
+}
+
 export function flattenTreeFiles(dir: VirtualDir): string[] {
   const out: string[] = [...(dir.files ?? [])];
   for (const sub of dir.dirs ?? []) {
@@ -184,22 +365,6 @@ export function flattenTreeFiles(dir: VirtualDir): string[] {
 
 export function treeFiles(ws: WorkspaceFile): string[] {
   return ws.tree ? flattenTreeFiles(ws.tree) : [];
-}
-
-// Retire un chemin de l'arbre virtuel (tous les virtual dirs).
-export function removeFileFromTree(tree: VirtualDir, relPath: string): boolean {
-  let removed = false;
-  if (tree.files) {
-    const idx = tree.files.indexOf(relPath);
-    if (idx >= 0) {
-      tree.files.splice(idx, 1);
-      removed = true;
-    }
-  }
-  for (const sub of tree.dirs ?? []) {
-    removed = removeFileFromTree(sub, relPath) || removed;
-  }
-  return removed;
 }
 
 // --- Git ---
@@ -258,28 +423,4 @@ export async function diffNameStatus(
     }
   }
   return entries;
-}
-
-// Remote GitHub du repo (owner/repo) via 'origin' puis le 1er remote.
-export async function githubRemote(
-  root: string,
-): Promise<{ owner: string; repo: string } | undefined> {
-  const parse = (url: string) => {
-    const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/i);
-    return m ? { owner: m[1], repo: m[2] } : undefined;
-  };
-  try {
-    return parse(await git(root, ['remote', 'get-url', 'origin']));
-  } catch {
-    try {
-      const remotes = await git(root, ['remote']);
-      const first = remotes.split('\n')[0];
-      if (!first) {
-        return undefined;
-      }
-      return parse(await git(root, ['remote', 'get-url', first]));
-    } catch {
-      return undefined;
-    }
-  }
 }

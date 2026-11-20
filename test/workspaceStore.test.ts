@@ -1,3 +1,4 @@
+import './test-home';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'child_process';
@@ -7,13 +8,20 @@ import * as path from 'path';
 import {
   VirtualDir,
   computeFileHashes,
+  dedupeTree,
+  dataHome,
   deleteWorkspace,
+  listOrphanProjects,
+  migrateLegacyStore,
+  projectDataDir,
+  readActive,
+  removeProjectData,
+  writeActive,
   diffNameStatus,
   flattenTreeFiles,
   headCommit,
   listWorkspaces,
   loadWorkspace,
-  removeFileFromTree,
   saveWorkspace,
   slugify,
   treeFiles,
@@ -90,7 +98,7 @@ test('uniqueWorkspaceId suffixe en cas de collision', () => {
   assert.equal(uniqueWorkspaceId(root, 'Foo Bar'), 'foo-bar-2');
 });
 
-test('flattenTreeFiles / removeFileFromTree', () => {
+test('flattenTreeFiles', () => {
   const tree: VirtualDir = {
     name: '.',
     files: ['root.ts'],
@@ -108,9 +116,6 @@ test('flattenTreeFiles / removeFileFromTree', () => {
     'c.ts',
     'root.ts',
   ]);
-  assert.equal(removeFileFromTree(tree, 'b.ts'), true);
-  assert.equal(removeFileFromTree(tree, 'nope.ts'), false);
-  assert.deepEqual(flattenTreeFiles(tree).sort(), ['a.ts', 'c.ts', 'root.ts']);
 });
 
 test('computeFileHashes ne garde que les fichiers existants', () => {
@@ -165,4 +170,70 @@ test('headCommit + diffNameStatus sur un vrai repo git', async () => {
   const renamed = diff2.find((d) => d.status === 'renamed');
   assert.equal(renamed?.old_path, 'src/a.ts');
   assert.equal(renamed?.path, 'src/b.ts');
+});
+
+test('dedupeTree : un fichier une seule fois, dossier le plus profond prioritaire', () => {
+  const tree: VirtualDir = {
+    name: '.',
+    files: ['a.rs', './b.rs', 'd.rs'],
+    dirs: [
+      { name: 'x', files: ['b.rs', 'c.rs', 'c.rs'] },
+      { name: 'y', files: ['a.rs'] },
+      { name: 'vide', files: ['c.rs'] },
+    ],
+  };
+  const out = dedupeTree(tree);
+  assert.deepEqual(out.files, ['d.rs']);
+  assert.deepEqual(out.dirs, [
+    { name: 'x', files: ['b.rs', 'c.rs'] },
+    { name: 'y', files: ['a.rs'] },
+  ]);
+  assert.equal(flattenTreeFiles(out).length, 4);
+});
+
+test('les données vivent hors du projet (dossier de données utilisateur)', () => {
+  const root = makeTempRoot();
+  saveWorkspace(root, {
+    version: 1,
+    id: 'w',
+    source: { type: 'text', url: 'u' },
+  });
+  assert.ok(workspaceFilePath(root, 'w').startsWith(dataHome()));
+  assert.ok(projectDataDir(root).startsWith(path.join(dataHome(), 'projects')));
+  assert.deepEqual(fs.readdirSync(root), []); // rien écrit dans le projet
+  writeActive(root, 'w');
+  assert.equal(readActive(root), 'w');
+});
+
+test('migrateLegacyStore : déplace .smart-explorer/ du projet vers le dossier de données', () => {
+  const root = makeTempRoot();
+  const yaml = 'version: 1\nid: old\nsource:\n  type: text\n  url: u\n';
+  write(root, '.smart-explorer/workspaces/old.yaml', yaml);
+  write(root, '.smart-explorer/active', 'old');
+  assert.equal(migrateLegacyStore(root), 1);
+  assert.equal(loadWorkspace(root, 'old')?.id, 'old');
+  assert.equal(readActive(root), 'old');
+  assert.equal(fs.existsSync(path.join(root, '.smart-explorer')), false);
+  assert.equal(migrateLegacyStore(root), 0); // idempotent
+});
+
+test('projets orphelins : repérés puis supprimés', () => {
+  const root = makeTempRoot();
+  saveWorkspace(root, {
+    version: 1,
+    id: 'w',
+    source: { type: 'text', url: 'u' },
+  });
+  const dir = projectDataDir(root); // calculé avant la suppression du projet
+  assert.equal(
+    listOrphanProjects().some((o) => o.dir === dir),
+    false,
+  );
+  fs.rmSync(root, { recursive: true });
+  const orphan = listOrphanProjects().find((o) => o.dir === dir);
+  assert.ok(orphan);
+  assert.equal(orphan.workspaces, 1);
+  removeProjectData(orphan.dir);
+  assert.equal(fs.existsSync(orphan.dir), false);
+  assert.throws(() => removeProjectData(os.tmpdir()), /Refus/);
 });
