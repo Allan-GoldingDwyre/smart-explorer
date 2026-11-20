@@ -1,6 +1,6 @@
 ---
 name: smart-explorer
-description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, create_workspace, build_tree, update_files, set_instructions, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, set_active_workspace). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code.
+description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, get_workspace, create_workspace, build_tree, update_files, set_instructions, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, stop_following, set_active_workspace). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code.
 ---
 
 # Smart Explorer — focus sur une issue / PR
@@ -26,6 +26,9 @@ fichiers des petits dossiers vers leur parent. Les vrais fichiers ne bougent jam
 4. `build_tree` avec `files` : la liste de chemins (relatifs à la racine du projet).
    Ne construis pas d'arbre toi-même.
 5. `set_active_workspace` pour afficher le workspace dans la vue.
+6. Optionnel : passe `focus: { path, line?, match? }` à `build_tree` pour mettre en avant
+   le fichier/la ligne qui demande l'attention : VS Code l'ouvre à cet endroit et le
+   sélectionne dans l'arbre.
 
 Le résultat indique `mode`, `files_count`, `folders_count` et `missing_files` (chemins qui
 n'existent pas : corrige-les).
@@ -60,6 +63,12 @@ n'existent pas : corrige-les).
 - `sync_workspace` → diff depuis `base_commit` (added / modified / deleted / renamed,
   fichiers dont le hash a dérivé). `apply_sync` applique ce que l'utilisateur valide
   (`accepted[]` / `rejected[]`) et remet `base_commit` à jour.
+- `get_workspace` lit un workspace (par défaut l'actif) : source, besoin de l'utilisateur
+  (`instructions`), fichiers et arbre.
+- `reveal_file` (`path`, `line?`, `end_line?`, `match?`, `workspace_id?`) met un fichier/une plage
+  en avant : VS Code l'ouvre à la ligne de début, surligne jusqu'à `end_line` et le sélectionne
+  dans l'arbre ; `stop_following` termine ce suivi.
+  Pour une visite guidée étape par étape, utilise le skill `smart-explorer-baby-steps`.
 - `check_workspace_files` → chemins introuvables + candidats (renommages).
 - `export_context` (`max_tokens?`) → contenu des fichiers du workspace.
 
