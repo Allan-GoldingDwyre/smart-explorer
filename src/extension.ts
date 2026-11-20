@@ -360,7 +360,11 @@ export function activate(context: vscode.ExtensionContext) {
     editor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
     paintHighlight();
     log(`ouvert : ${shown.toString()} (ligne ${mark.line})`);
-    return { uri: shown, line: mark.line };
+    return {
+      uri: shown,
+      line: mark.line,
+      endLine: mark.range?.endLine ?? mark.line,
+    };
   };
 
   // État de suivi (follow.json), partagé avec l'agent : « following » affiche

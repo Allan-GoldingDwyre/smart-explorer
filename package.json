@@ -248,6 +248,15 @@
           "type": "boolean",
           "default": true,
           "description": "Sélectionne dans l'arbre Smart Explorer le fichier ouvert dans l'éditeur (s'il fait partie du workspace mis en avant)."
+        },
+        "smartExplorer.walkthrough.commentPosition": {
+          "type": "string",
+          "enum": [
+            "below",
+            "above"
+          ],
+          "default": "below",
+          "description": "Où afficher l'explication d'une étape de la visite guidée : sous le code visé (défaut) ou juste au-dessus."
         }
       }
     },

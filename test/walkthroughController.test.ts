@@ -35,6 +35,7 @@ function setup() {
       return {
         uri: vscodeMock.Uri.file(path.join(root, focus.path)),
         line: focus.line ?? 1,
+        endLine: focus.end_line ?? focus.line ?? 1,
       };
     },
     endFollow: () => {
@@ -70,7 +71,8 @@ test('contrôleur : la première étape ouvre le fichier et crée le fil au-dess
   assert.equal(shown[0].path, 'Cargo.toml');
   assert.equal(live().length, 1);
   const thread = live()[0];
-  assert.equal(thread.range.startLine, 37); // 0-based : ligne 39 -> ancré sur la ligne 38
+  // par défaut : sous le code visé (ligne 39 -> ancre 0-based 38)
+  assert.equal(thread.range.startLine, 38);
   assert.equal(thread.canReply, true);
   assert.equal(thread.comments.length, 1);
   assert.equal(thread.comments[0].body.value, 'chrono retiré.');
@@ -244,7 +246,7 @@ test('contrôleur : un échec d’ouverture n’empêche pas le fil (journalisé
   await controller.sync();
   const threads = vscodeMock.comments.controllers[0].threads;
   assert.equal(threads.length, 1);
-  assert.equal(threads[0].range.startLine, 2); // ligne 4 -> ancre ligne 3 (0-based 2)
+  assert.equal(threads[0].range.startLine, 3); // ligne 4, sous le code (0-based 3)
   assert.ok(
     logs.some((l) => l.includes('ouverture impossible') && l.includes('boom')),
   );
@@ -284,4 +286,41 @@ test('contrôleur : Stop marche même si la visite n’est pas suivie par ce con
   const empty = setup();
   assert.equal(await empty.controller.stop(), false);
   assert.equal(empty.ended(), 1);
+});
+
+test('contrôleur : position du fil — sous la plage (défaut) ou au-dessus (réglage)', async () => {
+  const original = vscodeMock.workspace.getConfiguration;
+  try {
+    // défaut : ancré sur la dernière ligne de la plage (lignes 10 à 14 -> 0-based 13)
+    const a = setup();
+    await walkthroughStartTool(a.env, { mode: 'flow' });
+    await walkthroughStepTool(a.env, {
+      title: 'A',
+      text: 'a',
+      path: 'a.rs',
+      line: 10,
+      end_line: 14,
+    });
+    await a.controller.sync();
+    assert.equal(a.live()[0].range.startLine, 13);
+
+    // réglage « above » : ancré sur la ligne précédente le début (ligne 10 -> 0-based 8)
+    vscodeMock.workspace.getConfiguration = () => ({
+      get: (key: string, fallback: unknown) =>
+        key === 'walkthrough.commentPosition' ? 'above' : fallback,
+    });
+    const b = setup();
+    await walkthroughStartTool(b.env, { mode: 'flow' });
+    await walkthroughStepTool(b.env, {
+      title: 'A',
+      text: 'a',
+      path: 'a.rs',
+      line: 10,
+      end_line: 14,
+    });
+    await b.controller.sync();
+    assert.equal(b.live()[0].range.startLine, 8);
+  } finally {
+    vscodeMock.workspace.getConfiguration = original;
+  }
 });

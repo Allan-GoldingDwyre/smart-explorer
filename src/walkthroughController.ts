@@ -25,7 +25,7 @@ export interface WalkthroughHooks {
   // retourne l'ancre du fil : le document et la ligne (1-based) mise en avant.
   showStep(
     focus: FocusRequest,
-  ): Promise<{ uri: vscode.Uri; line: number } | undefined>;
+  ): Promise<{ uri: vscode.Uri; line: number; endLine: number } | undefined>;
   // La visite se termine côté éditeur : retire « Following agent » et le surlignage.
   endFollow(): void | Promise<void>;
   // Rafraîchit le panneau (avancement de la visite).
@@ -157,7 +157,7 @@ export class WalkthroughController implements vscode.Disposable {
       return;
     }
     this.current = n;
-    let anchor: { uri: vscode.Uri; line: number } | undefined;
+    let anchor: { uri: vscode.Uri; line: number; endLine: number } | undefined;
     try {
       anchor = await this.hooks.showStep({
         path: step.path,
@@ -179,6 +179,7 @@ export class WalkthroughController implements vscode.Disposable {
     anchor ??= {
       uri: vscode.Uri.file(path.join(this.root, step.path)),
       line: step.line ?? 1,
+      endLine: step.end_line ?? step.line ?? 1,
     };
     // L'ancien fil d'étape disparaît (l'historique reste dans les fichiers).
     for (const [id, thread] of [...this.threads]) {
@@ -188,9 +189,17 @@ export class WalkthroughController implements vscode.Disposable {
       }
     }
     {
-      // Un fil s'affiche SOUS sa ligne : ancré sur la ligne précédente, il
-      // apparaît juste au-dessus de la ligne mise en avant.
-      const above = Math.max(anchor.line - 2, 0);
+      // Un fil s'affiche SOUS sa ligne d'ancrage. Par défaut : ancré sur la
+      // dernière ligne mise en avant, donc juste sous le code visé (le code
+      // reste lisible). Réglage « above » : ancré sur la ligne précédente, donc
+      // juste au-dessus.
+      const position = vscode.workspace
+        .getConfiguration('smartExplorer')
+        .get<string>('walkthrough.commentPosition', 'below');
+      const above =
+        position === 'above'
+          ? Math.max(anchor.line - 2, 0)
+          : Math.max(anchor.endLine - 1, 0);
       // Le fil est créé AVEC son premier commentaire (créé vide puis rempli, il
       // peut ne jamais s'afficher) et sur une plage non vide.
       const initial = threadMessages(
