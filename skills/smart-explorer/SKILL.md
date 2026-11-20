@@ -1,6 +1,6 @@
 ---
 name: smart-explorer
-description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, get_workspace, create_workspace, build_tree, update_files, set_instructions, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, stop_following, set_active_workspace). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code.
+description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, get_workspace, create_workspace, build_tree, update_files, set_instructions, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, stop_following, set_active_workspace, walkthrough_start, walkthrough_step, walkthrough_reply, walkthrough_wait, walkthrough_end). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code.
 ---
 
 # Smart Explorer — focus sur une issue / PR
@@ -68,6 +68,9 @@ n'existent pas : corrige-les).
 - `reveal_file` (`path`, `line?`, `end_line?`, `match?`, `workspace_id?`) met un fichier/une plage
   en avant : VS Code l'ouvre à la ligne de début, surligne jusqu'à `end_line` et le sélectionne
   dans l'arbre ; `stop_following` termine ce suivi.
+- Visite guidée dans VS Code (fils de commentaire, étapes en flux, réponses dans le fil) :
+  `walkthrough_start` / `walkthrough_step` / `walkthrough_wait` / `walkthrough_reply` /
+  `walkthrough_end`, décrits dans le skill `smart-explorer-baby-steps`.
   Pour une visite guidée étape par étape, utilise le skill `smart-explorer-baby-steps`.
 - `check_workspace_files` → chemins introuvables + candidats (renommages).
 - `export_context` (`max_tokens?`) → contenu des fichiers du workspace.
