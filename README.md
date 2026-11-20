@@ -6,8 +6,8 @@ Un explorateur de fichiers plus intelligent pour VS Code, piloté par un agent I
 
 - Tree view custom dans l'Activity Bar VS Code
 - Arbre plat des fichiers pertinents d'une issue/PR, clic pour ouvrir, bouton refresh
-- **Serveur MCP intégré à l'extension** (VS Code ≥ 1.101, déclaré par l'extension et lancé par VS Code) : un agent MCP pilote les workspaces via 13 tools (`list_workspaces`, `get_workspace`, `create_workspace`, `build_tree`, `update_files`, `set_instructions`, `sync_workspace`, `apply_sync`, `check_workspace_files`, `export_context`, `reveal_file`, `stop_following`, `set_active_workspace`). L'extension reste le rendering + registry.
-- **Serveur MCP stdio pour clients externes** (Claude Code, Vibe, CLI Mistral — voir ci-dessous) : bundle autonome `smart-explorer-mcp.js`, mêmes 13 tools, logique partagée dans `src/mcpTools.ts`.
+- **Serveur MCP intégré à l'extension** (VS Code ≥ 1.101, déclaré par l'extension et lancé par VS Code) : un agent MCP pilote les workspaces via 18 tools (`list_workspaces`, `get_workspace`, `create_workspace`, `build_tree`, `update_files`, `set_instructions`, `sync_workspace`, `apply_sync`, `check_workspace_files`, `export_context`, `reveal_file`, `stop_following`, `set_active_workspace`, et la visite guidée : `walkthrough_start`, `walkthrough_step`, `walkthrough_reply`, `walkthrough_wait`, `walkthrough_end`). L'extension reste le rendering + registry.
+- **Serveur MCP stdio pour clients externes** (Claude Code, Vibe, CLI Mistral — voir ci-dessous) : bundle autonome `smart-explorer-mcp.js`, mêmes 18 tools, logique partagée dans `src/mcpTools.ts`.
 - **Skill agent** cross-IA dans `skills/smart-explorer/SKILL.md` : documente le workflow complet pour n'importe quel agent MCP.
 
 ## 1. Installer l'extension dans VS Code
@@ -72,13 +72,20 @@ cp -r skills/smart-explorer skills/smart-explorer-baby-steps ~/.vibe/skills/
 
 Le skill (`skills/smart-explorer/SKILL.md`) décrit quand se charger et le workflow standard : lecture de la source par l'agent → `create_workspace` → sélection des fichiers pertinents → `build_tree` → `set_active_workspace`, plus la maintenance (`sync_workspace`, `check_workspace_files`, `apply_sync`, `export_context`).
 
-Le skill `skills/smart-explorer-baby-steps/SKILL.md` décrit la **visite guidée du workspace actif, ancrée sur l'issue/PR** (`get_workspace` donne la source, le besoin de l'utilisateur et les fichiers) : l'agent génère les étapes, explique un point clé à la fois (3-4 phrases) et fait une pause (« Continuer ? » / question) pendant que VS Code ouvre le fichier à la bonne ligne. Trois modes : suivre un **flow**, parcourir les **types de changements clés** d'une issue/PR, ou guider une **review** vers les endroits qui méritent l'attention.
+Le skill `skills/smart-explorer-baby-steps/SKILL.md` décrit la **visite guidée du workspace actif, ancrée sur l'issue/PR**, qui se déroule **entièrement dans VS Code** (le terminal reste quasi silencieux) :
+
+- **Fils de commentaire** (comme Copilot) : chaque étape est un commentaire ancré juste au-dessus de la ligne visée ; l'utilisateur répond dans le fil (ou pose une question sur n'importe quelle ligne via le « + » de la marge) et l'agent répond **dans le même fil**. Boutons **Continuer**, **Précédent** et **Stop** dans l'en-tête du fil. Raccourcis pendant une visite (modifiables dans les raccourcis clavier) : **`ctrl+alt+→`** étape suivante, **`ctrl+alt+←`** étape précédente, **`ctrl+alt+⌫`** arrêter.
+- **Étapes en flux** : l'agent annonce un plan (`walkthrough_start`), puis pousse les étapes une à une (`walkthrough_step`) pendant que tu lis la première ; _Continuer_ est géré par VS Code seul (étape déjà arrivée = affichage immédiat, sinon « génération… » puis affichage dès son arrivée). L'avancement (`étape 2/5 …`) est affiché sur la ligne **Following agent** du panneau.
+- **Commentaires** : écrits dans un fichier d'événements ; l'agent les récupère avec `walkthrough_wait` (appel bloquant, `timeout_s` ≤ 1800 s, rappelé tant que la visite continue) et répond avec `walkthrough_reply`. Si l'agent génère encore des étapes, `pending_comments` lui signale ton commentaire sans attendre.
+- **Repli** : l'extension écrit un signal de vie ; si VS Code n'est pas ouvert sur le projet, `walkthrough_start` répond `ui: false` et l'agent fait la visite dans le terminal.
+
+Trois modes : suivre un **flow**, parcourir les **types de changements clés** d'une issue/PR, ou guider une **review** vers les endroits qui méritent l'attention.
 
 ## 4. Utilisation
 
 **Depuis VS Code** : la vue Smart Explorer affiche les workspaces du projet ouvert, créés par l'agent. Clic sur un fichier pour l'ouvrir, `revealInExplorer` pour le retrouver dans l'explorateur classique, refresh / rename / add instruction / delete via le menu contextuel ; l'icône corbeille à droite d'un workspace le supprime avec ses données (confirmation demandée). Le fichier ouvert dans l'éditeur est sélectionné automatiquement dans l'arbre s'il fait partie du workspace mis en avant (réglage `smartExplorer.followActiveEditor`, activé par défaut) ; si le fichier appartient à un seul autre workspace du projet, la vue bascule sur celui-ci. Granularité de la mise en avant : sans `line` = fichier entier (rien de sélectionné) ; `line` seule = une ligne, ou seulement le texte `match` (inline) ; `line` + `end_line` = une petite plage, plafonnée à 25 lignes (une seule zone par appel). La ligne **Following agent** et le fichier de la visite dans l'arbre sont en **orange** (couleur `smartExplorer.agentActive`), distincts du fichier sélectionné. Quand l'agent met un fichier en avant (`reveal_file`, ou `focus` de `build_tree`), c'est comme Live Share : le fichier s'ouvre à la ligne de début, la plage de lignes est surlignée avec un CodeLens **Smart Explorer** (+ « Stop following »), et une ligne **Following agent** apparaît au-dessus du workspace actif dans le panneau (clic = retour à la position de l'agent, ✕ = arrêter le suivi). Elle disparaît quand l'agent termine (`stop_following`), quand tu cliques sur Stop (le surlignage part aussi ; le prochain `reveal_file` de l'agent relance simplement le suivi) ou après 30 min d'inactivité ; la commande **Follow agent (resume)** reprend. Avec `diff: { from, to?, from_path?, side? }`, l'agent montre le **diff unifié** (une seule vue, lignes +/−) du fichier entre deux révisions au lieu du code actuel ; il est réservé aux petits changements (≤ 60 lignes modifiées, fichier existant), sinon il est ignoré et le code actuel est montré ; `line`/`end_line` visent le nouveau côté (ou l'ancien avec `side: "old"`). La commande **Smart Explorer: Clean Orphaned Data** supprime les données des projets qui n'existent plus.
 
-**Depuis l'agent** (via les 13 tools MCP) :
+**Depuis l'agent** (via les 18 tools MCP) :
 
 1. Lire la source (issue/PR) soi-même (`gh`, web) : le serveur ne la récupère pas.
 2. `create_workspace` avec l'URL/texte + `instructions` = le besoin de l'utilisateur (ex. « relire la migration serde »).
@@ -95,7 +102,10 @@ Les workspaces sont de la métadonnée utilisateur : ils ne vivent **pas** dans 
 ~/.local/share/smart-explorer/projects/<nom>-<hash du chemin>/
 ├── workspaces/<id>.yaml    # un fichier par workspace
 ├── active                  # workspace affiché dans la vue
-└── follow.json             # suivi de l'agent : état + dernière plage mise en avant
+├── follow.json             # suivi de l'agent : état + dernière plage mise en avant
+├── walkthrough.json        # visite guidée : plan, étapes, réponses de l'agent (écrit par le serveur)
+├── walkthrough-events.jsonl# commentaires/navigation de l'utilisateur (écrit par l'extension)
+└── ui.json                 # signal de vie de l'extension
 ```
 
 Dossier de base : `$SMART_EXPLORER_HOME`, sinon `$XDG_DATA_HOME/smart-explorer`, sinon `~/.local/share/smart-explorer` (`%APPDATA%` sous Windows). L'extension et le serveur stdio calculent la même clé de projet (chemin réel du dossier). Un ancien `.smart-explorer/` dans le projet est migré automatiquement au premier lancement.
@@ -134,7 +144,7 @@ smart-explorer/
 │   ├── workspaceStore.ts         # Store YAML hors projet, fraîcheur, migration
 │   ├── treeFusion.ts             # Fusion de dossiers (build_tree files)
 │   ├── treeOps.ts                # Validation/doublons d'un arbre fourni par l'agent
-│   ├── mcpSpecs.ts / mcpTools.ts # Définition des 13 tools + logique partagée
+│   ├── mcpSpecs.ts / mcpTools.ts # Définition des 18 tools + logique partagée
 │   ├── mcpServer.ts              # Déclare le serveur MCP à VS Code
 │   └── mcpStdio.ts               # Entrée stdio pour clients externes
 ├── resources/
