@@ -42,6 +42,7 @@ function makeGitRepo(): string {
   git(root, ['init', '-q']);
   git(root, ['config', 'user.email', 'test@example.com']);
   git(root, ['config', 'user.name', 'Test']);
+  git(root, ['config', 'commit.gpgsign', 'false']); // indépendant de la config globale
   return root;
 }
 
