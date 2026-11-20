@@ -47,17 +47,16 @@ async function rootNodes(
   return provider.getChildren(undefined);
 }
 
-test('racine : un noeud repliable par workspace du projet', async () => {
+test('racine : le workspace du projet est un noeud déplié avec son type', async () => {
   const root = openProject();
   saveWorkspace(root, ws('a'));
-  saveWorkspace(root, ws('b'));
   const nodes = await rootNodes(new SmartExplorerProvider());
   assert.deepEqual(
     nodes.map((n) => n.label),
-    ['A', 'B'],
+    ['A'],
   );
   assert.equal(nodes[0].contextValue, 'workspace-pr');
-  assert.equal(nodes[0].collapsibleState, 1);
+  assert.equal(nodes[0].collapsibleState, 2);
 });
 
 test('racine : projet sans workspace -> vue vide (welcome page)', async () => {
@@ -156,30 +155,64 @@ test('addInstruction : ajoute le besoin au workspace', async () => {
   ]);
 });
 
-test('plusieurs workspaces : tous affichés, l’actif en premier et déplié ; un actif périmé est ignoré', async () => {
+test('plusieurs workspaces : le haut montre l’actif déplié, la vue du bas les autres repliés', async () => {
   const root = openProject();
   saveWorkspace(root, ws('a'));
   saveWorkspace(root, ws('b'));
-  const provider = new SmartExplorerProvider();
+  saveWorkspace(root, ws('c'));
+  const main = new SmartExplorerProvider('main');
+  const others = new SmartExplorerProvider('others');
+  // Sans actif : le premier du projet est mis en avant.
   assert.deepEqual(
-    (await rootNodes(provider)).map((n) => n.label),
-    ['A', 'B'],
+    (await rootNodes(main)).map((n) => n.label),
+    ['A'],
+  );
+  assert.deepEqual(
+    (await rootNodes(others)).map((n) => n.label),
+    ['B', 'C'],
   );
   writeActive(root, 'b');
-  provider.reloadFromDisk();
-  const nodes = await rootNodes(provider);
+  main.reloadFromDisk();
+  others.reloadFromDisk();
+  const top = await rootNodes(main);
   assert.deepEqual(
-    nodes.map((n) => n.label),
-    ['B', 'A'],
+    top.map((n) => n.label),
+    ['B'],
   );
-  assert.equal(nodes[0].collapsibleState, 2); // Expanded
-  assert.equal(nodes[1].collapsibleState, 1); // Collapsed
+  assert.equal(top[0].collapsibleState, 2); // Expanded
+  const bottom = await rootNodes(others);
+  assert.deepEqual(
+    bottom.map((n) => n.label),
+    ['A', 'C'],
+  );
+  assert.ok(bottom.every((n) => n.collapsibleState === 1)); // Collapsed
+  assert.equal(others.othersCount(), 2);
+  // Actif périmé : ignoré, retour au premier workspace.
   writeActive(root, 'supprime');
-  provider.reloadFromDisk();
+  main.reloadFromDisk();
   assert.deepEqual(
-    (await rootNodes(provider)).map((n) => n.label),
-    ['A', 'B'],
+    (await rootNodes(main)).map((n) => n.label),
+    ['A'],
   );
+});
+
+test('activateWorkspace : un workspace du bas devient l’actif', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  saveWorkspace(root, ws('b'));
+  const main = new SmartExplorerProvider('main');
+  const others = new SmartExplorerProvider('others');
+  main.activateWorkspace((await rootNodes(others))[0]);
+  others.reloadFromDisk();
+  assert.deepEqual(
+    (await rootNodes(main)).map((n) => n.label),
+    ['B'],
+  );
+  assert.deepEqual(
+    (await rootNodes(others)).map((n) => n.label),
+    ['A'],
+  );
+  main.activateWorkspace(undefined); // no-op
 });
 
 test('revealInExplorer : chemin du fichier virtuel ; no-op sur un dossier', async () => {

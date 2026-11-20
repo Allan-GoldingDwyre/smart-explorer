@@ -21,10 +21,15 @@ export function activate(context: vscode.ExtensionContext) {
     }
   }
 
-  const provider = new SmartExplorerProvider();
+  // Deux vues : le workspace actif (haut) et les autres, repliés (bas).
+  const provider = new SmartExplorerProvider('main');
+  const othersProvider = new SmartExplorerProvider('others');
   const treeView = vscode.window.createTreeView('smartExplorerView', {
     treeDataProvider: provider,
     showCollapseAll: true,
+  });
+  const othersView = vscode.window.createTreeView('smartExplorerOthers', {
+    treeDataProvider: othersProvider,
   });
 
   // Serveur MCP déclaré à VS Code (lancé par VS Code, exposé au chat). Les
@@ -32,9 +37,17 @@ export function activate(context: vscode.ExtensionContext) {
   registerMcpServer(context);
 
   const reload = () => {
-    provider.reloadFromDisk();
-    provider.refresh();
+    for (const p of [provider, othersProvider]) {
+      p.reloadFromDisk();
+      p.refresh();
+    }
+    void vscode.commands.executeCommand(
+      'setContext',
+      'smartExplorer.hasOthers',
+      othersProvider.othersCount() > 0,
+    );
   };
+  reload();
   const disposables: vscode.Disposable[] = [];
   if (root) {
     // Les données vivent hors du projet : on surveille leur dossier.
@@ -57,20 +70,39 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     treeView,
+    othersView,
     ...disposables,
     vscode.commands.registerCommand('smartExplorer.refresh', reload),
-    vscode.commands.registerCommand('smartExplorer.renameWorkspace', () => {
-      provider.renameWorkspace(
-        treeView.selection[0] as SmartExplorerNode | undefined,
-      );
-    }),
+    vscode.commands.registerCommand(
+      'smartExplorer.activateWorkspace',
+      (node: SmartExplorerNode) => {
+        provider.activateWorkspace(node);
+        reload();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'smartExplorer.renameWorkspace',
+      async () => {
+        const node = (treeView.selection[0] ?? othersView.selection[0]) as
+          | SmartExplorerNode
+          | undefined;
+        await provider.renameWorkspace(node);
+        reload();
+      },
+    ),
     vscode.commands.registerCommand(
       'smartExplorer.deleteWorkspace',
-      (node: SmartExplorerNode) => provider.deleteWorkspace(node),
+      async (node: SmartExplorerNode) => {
+        await provider.deleteWorkspace(node);
+        reload();
+      },
     ),
     vscode.commands.registerCommand(
       'smartExplorer.addInstruction',
-      (node: SmartExplorerNode) => provider.addInstruction(node),
+      async (node: SmartExplorerNode) => {
+        await provider.addInstruction(node);
+        reload();
+      },
     ),
     vscode.commands.registerCommand(
       'smartExplorer.revealInExplorer',

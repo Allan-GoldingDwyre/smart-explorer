@@ -10,7 +10,12 @@ import {
   listWorkspaces,
   readActive,
   saveWorkspace,
+  writeActive,
 } from './workspaceStore';
+
+// 'main' : le workspace actif, déplié. 'others' : les autres workspaces du
+// projet, repliés (vue du bas).
+export type ProviderSection = 'main' | 'others';
 
 export class SmartExplorerProvider
   implements vscode.TreeDataProvider<SmartExplorerNode>
@@ -24,7 +29,7 @@ export class SmartExplorerProvider
   private workspaces: WorkspaceFile[] = [];
   private activeId?: string;
 
-  constructor() {
+  constructor(private readonly section: ProviderSection = 'main') {
     this.reloadFromDisk();
   }
 
@@ -42,6 +47,29 @@ export class SmartExplorerProvider
     this.activeId = this.workspaces.some((w) => w.id === active)
       ? active
       : undefined;
+  }
+
+  // Workspace affiché en haut : l'actif, sinon le premier du projet.
+  private effectiveActiveId(): string | undefined {
+    return this.activeId ?? this.workspaces[0]?.id;
+  }
+
+  // Nombre de workspaces de la vue du bas (pilote sa visibilité).
+  othersCount(): number {
+    const active = this.effectiveActiveId();
+    return this.workspaces.filter((w) => w.id !== active).length;
+  }
+
+  // Rend un workspace actif (écrit le fichier lu aussi par les clients MCP).
+  activateWorkspace(node: SmartExplorerNode | undefined): void {
+    const ws = node?.workspaceFile;
+    const root = this.projectRoot();
+    if (!ws || !root) {
+      return;
+    }
+    writeActive(root, ws.id);
+    this.reloadFromDisk();
+    this.refresh();
   }
 
   refresh(): void {
@@ -151,17 +179,18 @@ export class SmartExplorerProvider
     return [];
   }
 
-  // Tous les workspaces du projet ; l'actif (choisi par l'agent ou par
-  // set_active_workspace) vient en premier et est déplié.
+  // Vue principale : le workspace actif, déplié. Vue du bas : les autres,
+  // repliés.
   private async getRootChildren(): Promise<SmartExplorerNode[]> {
-    const ordered = [...this.workspaces].sort(
-      (a, b) => Number(b.id === this.activeId) - Number(a.id === this.activeId),
+    const active = this.effectiveActiveId();
+    const shown = this.workspaces.filter((w) =>
+      this.section === 'main' ? w.id === active : w.id !== active,
     );
-    return ordered.map(
+    return shown.map(
       (w) =>
         new SmartExplorerNode(
           w.name ?? w.source.title ?? w.id,
-          w.id === this.activeId
+          this.section === 'main'
             ? vscode.TreeItemCollapsibleState.Expanded
             : vscode.TreeItemCollapsibleState.Collapsed,
           {
