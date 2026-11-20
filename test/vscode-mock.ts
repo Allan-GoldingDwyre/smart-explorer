@@ -72,11 +72,62 @@ export const vscodeMock: any = {
     showWarningMessage: async (..._args: any[]) => warningQueue.shift(),
     showInformationMessage: async (..._args: any[]) => undefined,
     createTreeView: () => ({ selection: [] as any[] }),
+    visibleTextEditors: [] as any[],
   },
   workspace: {
     workspaceFolders: [] as any[],
+    asRelativePath: (uri: any) => String(uri?.fsPath ?? uri),
     getConfiguration: () => ({ get: () => undefined }),
     onDidChangeConfiguration: () => ({ dispose() {} }),
+  },
+  Range: class {
+    constructor(
+      public startLine: number,
+      public startCharacter: number,
+      public endLine: number,
+      public endCharacter: number,
+    ) {}
+    get start() {
+      return { line: this.startLine, character: this.startCharacter };
+    }
+    get end() {
+      return { line: this.endLine, character: this.endCharacter };
+    }
+  },
+  MarkdownString: class {
+    constructor(public value: string) {}
+  },
+  CommentMode: { Editing: 0, Preview: 1 },
+  CommentThreadCollapsibleState: { Collapsed: 0, Expanded: 1 },
+  // Contrôleur de commentaires factice : enregistre les fils créés.
+  comments: {
+    controllers: [] as any[],
+    createCommentController(id: string, label: string) {
+      const controller: any = {
+        id,
+        label,
+        threads: [] as any[],
+        options: undefined,
+        commentingRangeProvider: undefined,
+        createCommentThread(uri: any, range: any, comments: any[]) {
+          const thread: any = {
+            uri,
+            range,
+            comments,
+            canReply: false,
+            disposed: false,
+            dispose() {
+              thread.disposed = true;
+            },
+          };
+          controller.threads.push(thread);
+          return thread;
+        },
+        dispose() {},
+      };
+      vscodeMock.comments.controllers.push(controller);
+      return controller;
+    },
   },
   commands: {
     registerCommand: () => ({ dispose() {} }),
@@ -120,4 +171,5 @@ export function resetMock(): void {
   warningQueue.length = 0;
   executedCommands.length = 0;
   vscodeMock.workspace.workspaceFolders = [];
+  vscodeMock.comments.controllers.length = 0;
 }

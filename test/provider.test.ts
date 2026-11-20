@@ -8,6 +8,11 @@ import * as path from 'path';
 import { SmartExplorerProvider } from '../src/SmartExplorerProvider';
 import { SmartExplorerNode } from '../src/SmartExplorerNode';
 import {
+  appendEvent,
+  readWalkthrough,
+  writeWalkthrough,
+} from '../src/walkthrough';
+import {
   VirtualDir,
   WorkspaceFile,
   listWorkspaces,
@@ -327,4 +332,79 @@ test('ligne « Following agent » : au-dessus du workspace actif, disparaît qua
       ['workspace-pr'],
     );
   }
+});
+
+test('visite guidée : la ligne « Following agent » affiche l’avancement (étape n/total)', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  const at = new Date().toISOString();
+  writeWalkthrough(root, {
+    id: 'wt-1',
+    mode: 'changes',
+    outline: ['A', 'B', 'C'],
+    steps: [
+      { n: 1, title: 'Première', text: 'x', path: 'a.rs', at },
+      { n: 2, title: 'Deuxième', text: 'y', path: 'b.rs', at },
+    ],
+    complete: false,
+    messages: [],
+    status: 'active',
+    updated_at: at,
+  });
+  const main = new SmartExplorerProvider('main');
+  let row = (await rootNodes(main))[0];
+  assert.equal(row.label, 'Following agent');
+  assert.equal(row.description, 'étape 1/3 …'); // génération en cours (plan de 3)
+
+  // l'utilisateur est passé à l'étape 2 (événement de navigation)
+  appendEvent(root, { session: 'wt-1', type: 'continue', step: 2 });
+  main.reloadFromDisk();
+  row = (await rootNodes(main))[0];
+  assert.equal(row.description, 'étape 2/3 …');
+
+  // visite terminée : plus de ligne
+  writeWalkthrough(root, {
+    ...readWalkthrough(root)!,
+    status: 'ended',
+    complete: true,
+  });
+  main.reloadFromDisk();
+  assert.equal((await rootNodes(main))[0].contextValue, 'workspace-pr');
+});
+
+test('Following agent : disparaît dès que l’utilisateur arrête ou que la visite est périmée, sans attendre l’agent', async () => {
+  const root = openProject();
+  saveWorkspace(root, ws('a'));
+  const at = new Date().toISOString();
+  const session = {
+    id: 'wt-9',
+    mode: 'flow' as const,
+    outline: [],
+    steps: [{ n: 1, title: 'T', text: 'x', path: 'a.rs', at }],
+    complete: false,
+    messages: [],
+    status: 'active' as const,
+    updated_at: at,
+  };
+  writeWalkthrough(root, session);
+  const main = new SmartExplorerProvider('main');
+  assert.equal(main.isFollowing(), true);
+  assert.equal((await rootNodes(main))[0].label, 'Following agent');
+
+  // l'utilisateur clique sur Stop : la session reste « active » sur disque
+  // (l'agent ne l'a pas traité) mais la ligne part immédiatement
+  appendEvent(root, { session: 'wt-9', type: 'stop', step: 1 });
+  main.reloadFromDisk();
+  assert.equal(readWalkthrough(root)?.status, 'active');
+  assert.equal(main.isFollowing(), false);
+  assert.equal((await rootNodes(main))[0].contextValue, 'workspace-pr');
+
+  // agent disparu : plus aucune écriture depuis plus de 45 min
+  writeWalkthrough(root, {
+    ...session,
+    id: 'wt-10',
+    updated_at: new Date(Date.now() - 46 * 60 * 1000).toISOString(),
+  });
+  main.reloadFromDisk();
+  assert.equal(main.isFollowing(), false);
 });

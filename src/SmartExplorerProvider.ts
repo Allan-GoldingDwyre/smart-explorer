@@ -3,6 +3,13 @@ import * as vscode from 'vscode';
 import { FOLLOWING_URI_SCHEME, SmartExplorerNode } from './SmartExplorerNode';
 import { TYPE_ICONS, truncate } from './types';
 import {
+  WalkSession,
+  isLiveSession,
+  readEvents,
+  readWalkthrough,
+  walkProgress,
+} from './walkthrough';
+import {
   FollowState,
   VirtualDir,
   WorkspaceFile,
@@ -32,6 +39,7 @@ export class SmartExplorerProvider
   private workspaces: WorkspaceFile[] = [];
   private activeId?: string;
   private follow?: FollowState;
+  private walk?: { session: WalkSession; current: number };
 
   constructor(private readonly section: ProviderSection = 'main') {
     this.reloadFromDisk();
@@ -47,6 +55,23 @@ export class SmartExplorerProvider
     const root = this.projectRoot();
     this.workspaces = root ? listWorkspaces(root) : [];
     this.follow = root ? readFollow(root) : undefined;
+    // Visite guidée en cours : étape courante = celle du dernier événement.
+    const session = root ? readWalkthrough(root) : undefined;
+    this.walk =
+      root && session && isLiveSession(root, session)
+        ? {
+            session,
+            current: Math.min(
+              Math.max(
+                readEvents(root)
+                  .filter((e) => e.session === session.id)
+                  .at(-1)?.step ?? 1,
+                1,
+              ),
+              Math.max(session.steps.length, 1),
+            ),
+          }
+        : undefined;
     // Un actif périmé (workspace supprimé) est ignoré : la vue ne reste pas vide.
     const active = root ? readActive(root) : undefined;
     this.activeId = this.workspaces.some((w) => w.id === active)
@@ -237,9 +262,47 @@ export class SmartExplorerProvider
     return [...this.followRow(), ...shown.map((w) => this.workspaceNode(w))];
   }
 
+  // La ligne « Following agent » est-elle affichée ? (pilote le bouton Stop
+  // de la barre de titre et le raccourci clavier)
+  isFollowing(): boolean {
+    return this.followRow().length > 0;
+  }
+
   // Ligne « Following agent » au-dessus du workspace actif tant que l'agent
   // mène (disparaît quand l'agent ou l'utilisateur arrête le suivi).
   private followRow(): SmartExplorerNode[] {
+    const walk = this.walk;
+    if (this.section === 'main' && walk && walk.session.steps.length > 0) {
+      const step = walk.session.steps[walk.current - 1];
+      const progress = walkProgress(walk.session);
+      return [
+        new SmartExplorerNode(
+          'Following agent',
+          vscode.TreeItemCollapsibleState.None,
+          {
+            id: 'following',
+            contextValue: 'following',
+            iconId: 'eye',
+            iconColor: 'smartExplorer.agentActive',
+            resourceUri: vscode.Uri.from({
+              scheme: FOLLOWING_URI_SCHEME,
+              path: '/agent',
+            }),
+            description: `étape ${walk.current}/${progress.total}${
+              progress.generating ? ' …' : ''
+            }`,
+            tooltip: `Visite guidée : ${
+              step?.title ?? ''
+            }\nCliquer pour revenir à l'étape, ✕ pour arrêter.`,
+            command: {
+              command: 'smartExplorer.followingAgent',
+              title: "Revenir à l'étape de l'agent",
+            },
+          },
+        ),
+      ];
+    }
+
     const focus = this.follow?.focus;
     if (
       this.section !== 'main' ||

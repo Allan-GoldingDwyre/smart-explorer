@@ -97,6 +97,28 @@
       {
         "command": "smartExplorer.followAgent",
         "title": "Smart Explorer: Follow agent (resume)"
+      },
+      {
+        "command": "smartExplorer.walkthroughNext",
+        "title": "Continuer la visite",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "smartExplorer.walkthroughBack",
+        "title": "Étape précédente",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "smartExplorer.walkthroughReply",
+        "title": "Répondre"
+      },
+      {
+        "command": "smartExplorer.walkthroughSync",
+        "title": "Smart Explorer: Reload walkthrough"
+      },
+      {
+        "command": "smartExplorer.walkthroughTest",
+        "title": "Smart Explorer: Test comment thread"
       }
     ],
     "keybindings": [
@@ -105,10 +127,30 @@
         "key": "f2",
         "mac": "enter",
         "when": "view == smartExplorerView && focusedView == smartExplorerView && viewItem =~ /^workspace-/ && !inputFocus"
+      },
+      {
+        "command": "smartExplorer.walkthroughNext",
+        "key": "ctrl+alt+right",
+        "when": "smartExplorer.walkthrough"
+      },
+      {
+        "command": "smartExplorer.walkthroughBack",
+        "key": "ctrl+alt+left",
+        "when": "smartExplorer.walkthrough"
+      },
+      {
+        "command": "smartExplorer.stopFollowing",
+        "key": "ctrl+alt+backspace",
+        "when": "smartExplorer.following"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "smartExplorer.stopFollowing",
+          "when": "view == smartExplorerView && smartExplorer.following",
+          "group": "navigation@0"
+        },
         {
           "command": "smartExplorer.refresh",
           "when": "view == smartExplorerView",
@@ -150,6 +192,46 @@
           "command": "smartExplorer.deleteWorkspace",
           "when": "view =~ /^smartExplorer(View|Others)$/ && viewItem =~ /^workspace-/",
           "group": "2_danger@1"
+        },
+        {
+          "command": "smartExplorer.stopFollowing",
+          "when": "view == smartExplorerView && viewItem == following",
+          "group": "1_following"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "smartExplorer.walkthroughBack",
+          "group": "navigation@1",
+          "when": "commentController == smartExplorer"
+        },
+        {
+          "command": "smartExplorer.walkthroughNext",
+          "group": "navigation@2",
+          "when": "commentController == smartExplorer"
+        },
+        {
+          "command": "smartExplorer.stopFollowing",
+          "group": "navigation@3",
+          "when": "commentController == smartExplorer"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "smartExplorer.walkthroughReply",
+          "group": "inline@1",
+          "when": "commentController == smartExplorer"
+        },
+        {
+          "command": "smartExplorer.walkthroughNext",
+          "group": "inline@2",
+          "when": "commentController == smartExplorer"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "smartExplorer.walkthroughReply",
+          "when": "false"
         }
       ]
     },
