@@ -215,7 +215,7 @@
     "compile": "tsc -p ./",
     "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "compile:test": "tsc -p tsconfig.test.json",
-    "test": "npm run compile && npm run compile:test && npm run build:mcp && node --test out-test/test/",
+    "test": "npm run compile && npm run compile:test && npm run build:mcp && node --test out-test/test/*.test.js",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "build:mcp": "esbuild src/mcpStdio.ts --bundle --platform=node --target=node18 --outfile=dist/smart-explorer-mcp.js && chmod +x dist/smart-explorer-mcp.js"
