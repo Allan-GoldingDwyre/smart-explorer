@@ -5,7 +5,6 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { pathToFileURL } from 'url';
 import type { ToolEnv } from '../src/mcp/toolEnv';
 import {
   addStepTool,
@@ -14,12 +13,11 @@ import {
 } from '../src/mcp/walkthroughTools';
 import {
   Walkthrough,
-  languageOf,
   readWalkthrough,
-  renderWalkthrough,
-  walkthroughMarkdownPath,
+  walkthroughFilePath,
 } from '../src/walkthrough/walkthrough';
 import { createWorkspaceTool } from '../src/mcp/workspaceTools';
+import { renderWalkthroughBody } from '../src/walkthrough/walkthroughHtml';
 
 function openRoot(): { root: string; env: ToolEnv } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-walk-'));
@@ -35,7 +33,7 @@ function write(root: string, rel: string, content: string): void {
 const lines = (n: number, tag: string) =>
   Array.from({ length: n }, (_, i) => `${tag}${i + 1}`).join('\n') + '\n';
 
-test('add_step : la première étape crée la visite, la page markdown est écrite', async () => {
+test('add_step : la première étape crée la visite, le JSON est écrit', async () => {
   const { root, env } = openRoot();
   write(root, 'src/a.ts', lines(40, 'a'));
   const first = await addStepTool(env, {
@@ -49,7 +47,6 @@ test('add_step : la première étape crée la visite, la page markdown est écri
   assert.equal(first.position, 1);
   assert.equal(first.total, 1);
   assert.equal(first.created, true);
-  assert.equal(first.page, walkthroughMarkdownPath(root));
 
   const wt = readWalkthrough(root);
   assert.equal(wt?.title, 'PR #326 : parseur');
@@ -58,14 +55,15 @@ test('add_step : la première étape crée la visite, la page markdown est écri
     { path: 'src/a.ts', start: 10, end: 12, snippet: 'a10\na11\na12' },
   ]);
 
-  const page = fs.readFileSync(walkthroughMarkdownPath(root), 'utf8');
-  assert.match(page, /^# PR #326 : parseur/);
-  assert.match(page, /## 1\. Point d’entrée/);
+  const page = renderWalkthroughBody(readWalkthrough(root)!);
+  assert.match(page, /<h1>PR #326 : parseur<\/h1>/);
+  assert.match(page, /<h2><span class="num">1<\/span>Point d’entrée<\/h2>/);
   assert.match(page, /La PR remplace le parseur ici\./);
-  // lien cliquable vers la ligne de début + extrait figé
-  const url = pathToFileURL(path.join(root, 'src/a.ts')).href;
-  assert.ok(page.includes(`[\`src/a.ts:10-12\`](${url}#L10)`));
-  assert.ok(page.includes('```ts\na10\na11\na12\n```'));
+  // zone cliquable vers la ligne de début + extrait figé numéroté
+  assert.ok(page.includes('data-path="src/a.ts" data-line="10" data-end="12"'));
+  assert.ok(
+    page.includes('<span class="n">11</span><span class="t">a11</span>'),
+  );
 
   const second = await addStepTool(env, { title: 'Suite', text: 'Puis ici.' });
   assert.equal(second.step_id, 'step-2');
@@ -166,8 +164,8 @@ test('add_step : diff -> extrait du diff unifié', async () => {
   assert.equal(ref.diff, true);
   assert.match(ref.snippet!, /^@@ /);
   assert.match(ref.snippet!, /-a3\n\+CHANGED/);
-  const page = fs.readFileSync(walkthroughMarkdownPath(root), 'utf8');
-  assert.ok(page.includes('```diff\n@@'));
+  const page = renderWalkthroughBody(readWalkthrough(root)!);
+  assert.ok(page.includes('class="l hunk"'));
 });
 
 test('add_step : workspace actif associé à la visite', async () => {
@@ -202,29 +200,28 @@ test('get_walkthrough / delete_walkthrough', async () => {
       refs: [{ path: 'src/a.ts', start: 2, end: 2 }],
     },
   ]);
-  assert.equal(got.page, walkthroughMarkdownPath(root));
   assert.deepEqual(await deleteWalkthroughTool(env), {
     ok: true,
     deleted: true,
   });
-  assert.equal(fs.existsSync(walkthroughMarkdownPath(root)), false);
+  assert.equal(fs.existsSync(walkthroughFilePath(root)), false);
   assert.equal(readWalkthrough(root), undefined);
 });
 
-test('rendu : bloc de code robuste aux ``` du contenu, langage d’après l’extension', () => {
+test('rendu : tout est échappé (titre, texte, code), markdown minimal, page vide', () => {
   const wt: Walkthrough = {
-    title: 'T',
+    title: '<T>',
     steps: [
       {
         id: 'step-1',
-        title: 'Doc',
-        text: 'x',
+        title: 'Doc &',
+        text: 'Un `<b>` et **gras**',
         refs: [
           {
             path: 'docs/a.md',
             start: 1,
             end: 3,
-            snippet: '```ts\nconst a = 1;\n```',
+            snippet: 'if (a < b) {}',
           },
         ],
         updated_at: '',
@@ -233,12 +230,11 @@ test('rendu : bloc de code robuste aux ``` du contenu, langage d’après l’ex
     created_at: '',
     updated_at: '',
   };
-  const md = renderWalkthrough(wt, '/proj');
-  assert.ok(md.includes('````markdown\n```ts\nconst a = 1;\n```\n````'));
-  assert.equal(languageOf('a.py'), 'python');
-  assert.equal(languageOf('Makefile'), '');
-  assert.match(
-    renderWalkthrough({ ...wt, steps: [] }, '/proj'),
-    /Aucune étape/,
-  );
+  const html = renderWalkthroughBody(wt);
+  assert.ok(html.includes('<h1>&lt;T&gt;</h1>'));
+  assert.ok(html.includes('Doc &amp;'));
+  assert.ok(html.includes('<code>&lt;b&gt;</code> et <strong>gras</strong>'));
+  assert.ok(html.includes('if (a &lt; b) {}'));
+  assert.ok(!html.includes('<b>'));
+  assert.match(renderWalkthroughBody({ ...wt, steps: [] }), /Aucune étape/);
 });

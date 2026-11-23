@@ -3,7 +3,7 @@
 Le but : que la personne comprenne **ce que veut l'issue/PR ET le code qui y répond**, vite.
 Périmètre : **le workspace actif**. Chaque étape relie une attente de l'issue/PR à un endroit du code.
 
-**La visite est une page dans VS Code** (aperçu markdown) : par étape, une explication et des
+**La visite est une page dans VS Code** (onglet pleine largeur) : par étape, une explication et des
 extraits de code **cliquables** (un clic ouvre le fichier à la ligne). Tu ajoutes les étapes une
 à une avec `add_step`, la page se met à jour toute seule. **L'utilisateur te pose ses questions
 dans le terminal** : tu réponds, et tu mets l'étape concernée à jour en même temps.

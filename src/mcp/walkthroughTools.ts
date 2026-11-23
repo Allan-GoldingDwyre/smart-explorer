@@ -1,7 +1,7 @@
 // Tools de la visite guidée : `add_step`, `get_walkthrough`,
 // `delete_walkthrough`. L'agent pousse les étapes une à une ; chacune porte
 // une explication et des extraits de code figés (cliquables dans la page). Le
-// serveur écrit l'état et la page markdown (voir walkthrough/walkthrough.ts).
+// serveur écrit l'état JSON (voir walkthrough/walkthrough.ts), rendu par l'extension.
 import * as fs from 'fs';
 import * as path from 'path';
 import { MAX_RANGE_LINES, resolveRange } from '../core/focus';
@@ -13,7 +13,6 @@ import {
   Walkthrough,
   deleteWalkthrough,
   readWalkthrough,
-  walkthroughMarkdownPath,
   writeWalkthrough,
 } from '../walkthrough/walkthrough';
 import { FocusTarget, prepareFocus } from './focusTools';
@@ -82,8 +81,6 @@ export interface AddStepResult {
   total: number;
   // Étape créée (false : une étape de même `step_id` a été remplacée).
   created: boolean;
-  // Chemin de la page rendue (aperçu markdown de VS Code).
-  page: string;
   notes?: string[];
 }
 
@@ -155,7 +152,6 @@ export async function addStepTool(
     position: (index >= 0 ? index : wt.steps.length - 1) + 1,
     total: wt.steps.length,
     created: index < 0,
-    page: walkthroughMarkdownPath(env.root),
     ...(notes.length ? { notes } : {}),
   };
 }
@@ -171,7 +167,6 @@ export interface WalkthroughDetails {
     text: string;
     refs: { path: string; start?: number; end?: number }[];
   }[];
-  page?: string;
 }
 
 // État de la visite (pour la reprendre ou mettre une étape à jour). Les
@@ -194,7 +189,6 @@ export async function getWalkthroughTool(
       text: s.text,
       refs: s.refs.map((r) => ({ path: r.path, start: r.start, end: r.end })),
     })),
-    page: walkthroughMarkdownPath(env.root),
   };
 }
 

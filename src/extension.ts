@@ -10,7 +10,17 @@ import {
 import { registerMcpServer } from './mcp/mcpServer';
 import { SmartExplorerNode } from './view/SmartExplorerNode';
 import { SmartExplorerProvider } from './view/SmartExplorerProvider';
-import { walkthroughMarkdownPath } from './walkthrough/walkthrough';
+import {
+  readWalkthrough,
+  walkthroughFilePath,
+} from './walkthrough/walkthrough';
+import {
+  WalkStyle,
+  presetOf,
+  renderWalkthroughBody,
+  styleVars,
+  renderWalkthroughPage,
+} from './walkthrough/walkthroughHtml';
 import {
   DiffRequest,
   FocusRequest,
@@ -42,12 +52,12 @@ export function activate(context: vscode.ExtensionContext) {
   // clients écrivent les YAML ; l'extension re-render via le watcher.
   registerMcpServer(context);
 
-  const walkPage = root ? walkthroughMarkdownPath(root) : undefined;
+  const walkFile = root ? walkthroughFilePath(root) : undefined;
   const setHasWalkthrough = () =>
     vscode.commands.executeCommand(
       'setContext',
       'smartExplorer.hasWalkthrough',
-      !!walkPage && fs.existsSync(walkPage),
+      !!walkFile && fs.existsSync(walkFile),
     );
 
   const reload = () => {
@@ -259,7 +269,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Bon workspace, document ouvert à la zone, zone surlignée et sélectionnée,
   // fichier sélectionné (dossiers dépliés) dans l'arbre.
-  const showFocus = async (root: string, focus: FocusRequest) => {
+  const showFocus = async (
+    root: string,
+    focus: FocusRequest,
+    column?: vscode.ViewColumn,
+  ) => {
     log(
       `focus : ${focus.path}:${focus.line ?? '-'}${
         focus.diff ? ' (diff)' : ''
@@ -292,7 +306,10 @@ export function activate(context: vscode.ExtensionContext) {
         : new vscode.Range(r.startLine - 1, 0, r.endLine, 0)
       : new vscode.Range(mark.line - 1, 0, mark.line - 1, 0);
     const doc = await vscode.workspace.openTextDocument(shown);
-    const editor = await vscode.window.showTextDocument(doc, { selection });
+    const editor = await vscode.window.showTextDocument(doc, {
+      selection,
+      viewColumn: column,
+    });
     editor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
     paintHighlight();
   };
@@ -309,21 +326,117 @@ export function activate(context: vscode.ExtensionContext) {
     }
   };
 
-  // --- Page de la visite guidée (aperçu markdown natif) ---
+  // --- Page de la visite guidée (webview, onglet pleine largeur) ---
 
-  // La page (walkthrough.md) est régénérée à chaque étape par le serveur ; à
-  // sa création on ouvre l'aperçu, qui se rafraîchit ensuite tout seul.
-  const openWalkthrough = async () => {
-    if (!walkPage || !fs.existsSync(walkPage)) {
+  // Le serveur écrit walkthrough.json à chaque étape ; la page est un onglet
+  // de l'éditeur, mis à jour sur place (le défilement est conservé). Un clic
+  // sur un extrait ouvre le code à côté, la page reste lisible.
+  let walkPanel: vscode.WebviewPanel | undefined;
+  let lastVisit: string | undefined;
+
+  const openWalkthrough = () => {
+    const wt = root ? readWalkthrough(root) : undefined;
+    if (!wt) {
       void vscode.window.showInformationMessage(
         "Smart Explorer : aucune visite guidée en cours (demande à l'agent de la lancer).",
       );
       return;
     }
-    await vscode.commands.executeCommand(
-      'markdown.showPreviewToSide',
-      vscode.Uri.file(walkPage),
+    if (walkPanel) {
+      walkPanel.reveal(undefined, false);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      'smartExplorerWalkthrough',
+      'Visite guidée',
+      vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true },
     );
+    walkPanel = panel;
+    panel.onDidDispose(() => {
+      walkPanel = undefined;
+    });
+    panel.webview.onDidReceiveMessage(
+      (m: {
+        type?: string;
+        path?: string;
+        line?: number;
+        end_line?: number;
+      }) => {
+        if (root && m?.type === 'open' && m.path) {
+          showFocus(
+            root,
+            {
+              path: m.path,
+              line: m.line,
+              end_line: m.end_line,
+              at: new Date().toISOString(),
+            },
+            // Toujours le groupe juste à droite de la page : un seul split, réutilisé.
+            Math.min(
+              (panel.viewColumn ?? vscode.ViewColumn.One) + 1,
+              vscode.ViewColumn.Nine,
+            ) as vscode.ViewColumn,
+          ).catch((e) => log(`ouverture impossible : ${errText(e)}`));
+        }
+      },
+    );
+    const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    panel.title = wt.title;
+    panel.webview.html = renderWalkthroughPage(
+      wt,
+      nonce,
+      panel.webview.cspSource,
+      walkStyle(),
+    );
+  };
+
+  // Apparence de la page : réglages smartExplorer.walkthrough.*, appliqués en
+  // direct quand ils changent.
+  const walkStyle = (): WalkStyle => {
+    const c = vscode.workspace.getConfiguration('smartExplorer.walkthrough');
+    return {
+      fontFamily: c.get<string>('fontFamily'),
+      fontSize: c.get<string>('fontSize'),
+      codeFontFamily: c.get<string>('codeFontFamily'),
+      codeFontSize: c.get<string>('codeFontSize'),
+      maxWidth: c.get<string>('maxWidth'),
+      accentColor: c.get<string>('accentColor'),
+      codeBackground: c.get<string>('codeBackground'),
+      preset: c.get<string>('preset'),
+    };
+  };
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (walkPanel && e.affectsConfiguration('smartExplorer.walkthrough')) {
+        const style = walkStyle();
+        void walkPanel.webview.postMessage({
+          vars: styleVars(style),
+          preset: presetOf(style),
+        });
+      }
+    }),
+  );
+
+  // Fichier créé / modifié / remplacé (écriture atomique) : nouvelle visite →
+  // on ouvre la page ; sinon on met à jour celle qui est ouverte.
+  const onWalkthroughFile = () => {
+    void setHasWalkthrough();
+    const wt = root ? readWalkthrough(root) : undefined;
+    if (!wt) {
+      return;
+    }
+    if (wt.created_at !== lastVisit) {
+      lastVisit = wt.created_at;
+      if (!walkPanel) {
+        openWalkthrough();
+        return;
+      }
+    }
+    if (walkPanel) {
+      walkPanel.title = wt.title;
+      void walkPanel.webview.postMessage({ html: renderWalkthroughBody(wt) });
+    }
   };
 
   // Le fichier regardé (cmd+P, onglets, clic, focus…) est sélectionné dans
@@ -388,12 +501,14 @@ export function activate(context: vscode.ExtensionContext) {
       change: onFocus,
       create: onFocus,
     });
-    watch(projectDir, path.basename(walkthroughMarkdownPath(root)), {
-      create: () => {
+    watch(projectDir, path.basename(walkFile as string), {
+      create: onWalkthroughFile,
+      change: onWalkthroughFile,
+      del: () => {
         void setHasWalkthrough();
-        void openWalkthrough();
+        lastVisit = undefined;
+        walkPanel?.dispose();
       },
-      del: () => void setHasWalkthrough(),
     });
     disposables.push(
       vscode.window.onDidChangeActiveTextEditor((editor) => {

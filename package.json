@@ -146,6 +146,54 @@
           "type": "boolean",
           "default": true,
           "description": "Sélectionne dans l'arbre Smart Explorer le fichier ouvert dans l'éditeur (s'il fait partie du workspace mis en avant)."
+        },
+        "smartExplorer.walkthrough.preset": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "notion"
+          ],
+          "enumDescriptions": [
+            "Couleurs et polices du thème VS Code.",
+            "Page façon Notion : fond clair/sombre, typographie sans-serif, colonne étroite, code en pastille rouge."
+          ],
+          "default": "notion",
+          "description": "Look de la visite guidée. Les réglages ci-dessous restent prioritaires sur le preset."
+        },
+        "smartExplorer.walkthrough.fontFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Police du texte de la visite guidée (vide : celle de VS Code). Ex. : Georgia, serif."
+        },
+        "smartExplorer.walkthrough.fontSize": {
+          "type": "string",
+          "default": "",
+          "description": "Taille du texte de la visite guidée (vide : celle de VS Code). Ex. : 16px."
+        },
+        "smartExplorer.walkthrough.codeFontFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Police des extraits de code (vide : celle de l'éditeur). Ex. : 'Fira Code', monospace."
+        },
+        "smartExplorer.walkthrough.codeFontSize": {
+          "type": "string",
+          "default": "",
+          "description": "Taille des extraits de code (vide : celle de l'éditeur). Ex. : 13px."
+        },
+        "smartExplorer.walkthrough.maxWidth": {
+          "type": "string",
+          "default": "",
+          "description": "Largeur maximale de la page (vide : 960px). Ex. : 1200px ou 100%."
+        },
+        "smartExplorer.walkthrough.accentColor": {
+          "type": "string",
+          "default": "",
+          "description": "Couleur des liens, des numéros d'étape et du survol (vide : celle du thème). Ex. : #e5a50a."
+        },
+        "smartExplorer.walkthrough.codeBackground": {
+          "type": "string",
+          "default": "",
+          "description": "Fond des extraits de code (vide : celui de l'éditeur). Ex. : #1a1b26."
         }
       }
     },
@@ -180,6 +228,7 @@
     "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
     "eslint": "^8.55.0",
+    "highlight.js": "^11.12.0",
     "prettier": "^3.1.0",
     "typescript": "^5.3.0"
   },

@@ -52,7 +52,8 @@ export function dataHome(): string {
 
 function realPath(root: string): string {
   try {
-    return fs.realpathSync(root);
+    // .native : normalise aussi la casse (macOS insensible à la casse : Dev vs dev)
+    return fs.realpathSync.native(root);
   } catch {
     return path.resolve(root);
   }

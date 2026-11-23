@@ -65,11 +65,12 @@ cp -r skills/smart-explorer ~/.vibe/skills/
 
 Le skill (`skills/smart-explorer/SKILL.md`) décrit quand se charger et le workflow standard : lecture de la source par l'agent → `create_workspace` (liens issues/PR) → sélection des fichiers pertinents → `set_files` → `set_active_workspace`, plus la maintenance (`get_workspace` signale ce qui est périmé, `set_files { sync: true }` applique la partie mécanique).
 
-Le fichier `skills/smart-explorer/walkthrough.md` (lu par l'agent à la demande, depuis le skill `smart-explorer`) décrit la **visite guidée du workspace actif, ancrée sur l'issue/PR** : une **page dans VS Code** (l'aperçu markdown natif, rien de recréé) :
+Le fichier `skills/smart-explorer/walkthrough.md` (lu par l'agent à la demande, depuis le skill `smart-explorer`) décrit la **visite guidée du workspace actif, ancrée sur l'issue/PR** : une **page dans VS Code** (onglet pleine largeur, webview) :
 
 - **Une page par visite** : titre, puis pour chaque étape une explication concise et des **extraits de code cliquables** (un clic ouvre le fichier à la ligne dans l'éditeur). L'extrait est figé à la création de l'étape.
 - **Étapes en flux** : l'agent ajoute les étapes une à une avec `add_step` ; la page s'ouvre à la première (commande **Open Walkthrough**, ou bouton livre dans la vue) puis se met à jour toute seule pendant que tu lis. `get_walkthrough` relit l'état, `delete_walkthrough` repart de zéro.
 - **Questions** : tu les poses à l'agent dans le terminal ; il te répond et met l'étape concernée à jour (`add_step` avec son `step_id`, l'étape est remplacée sur place).
+- **Apparence** : preset `smartExplorer.walkthrough.preset` (`notion` par défaut, ou `vscode` pour reprendre les couleurs de ton thème), plus polices, tailles, largeur et couleurs réglables (`smartExplorer.walkthrough.*`). Les extraits sont colorés (highlight.js).
 
 Trois modes : suivre un **flow**, parcourir les **types de changements clés** d'une issue/PR, ou guider une **review** vers les endroits qui méritent l'attention.
 
@@ -94,8 +95,7 @@ Les workspaces sont de la métadonnée utilisateur : ils ne vivent **pas** dans 
 ├── workspaces/<id>.yaml    # un fichier par workspace
 ├── active                  # workspace affiché dans la vue
 ├── focus.json              # dernière demande `focus` de l'agent
-├── walkthrough.json        # visite guidée : titre, étapes, extraits (écrit par le serveur)
-└── walkthrough.md          # page de la visite, rendue depuis le JSON (aperçu markdown)
+└── walkthrough.json        # visite guidée : titre, étapes, extraits (écrit par le serveur)
 ```
 
 Dossier de base : `$SMART_EXPLORER_HOME`, sinon `$XDG_DATA_HOME/smart-explorer`, sinon `~/.local/share/smart-explorer` (`%APPDATA%` sous Windows). L'extension et le serveur stdio calculent la même clé de projet (chemin réel du dossier). Un ancien `.smart-explorer/` dans le projet est migré automatiquement au premier lancement.
@@ -146,7 +146,8 @@ smart-explorer/
 │   │   ├── SmartExplorerProvider.ts  # TreeDataProvider (vue)
 │   │   └── SmartExplorerNode.ts
 │   └── walkthrough/
-│       ├── walkthrough.ts        # Visite guidée : état JSON + page markdown
+│       ├── walkthrough.ts        # Visite guidée : état JSON
+│       └── walkthroughHtml.ts    # Rendu HTML de la page (webview)
 ├── resources/
 │   └── icon.svg                  # Activity bar icon
 └── .vscode/
