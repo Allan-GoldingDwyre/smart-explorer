@@ -66,10 +66,12 @@ n'existent pas : corrige-les).
 - `focus` (`path`, `line?`, `end_line?`, `match?`, `workspace_id?`) met un fichier/une plage
   en avant : VS Code l'ouvre à la ligne de début, surligne jusqu'à `end_line` et le sélectionne
   dans l'arbre. Demande ponctuelle : rien à arrêter ensuite.
-- **Visite guidée** (page VS Code : explication + extraits cliquables par étape) : `add_step`,
+- **Visite guidée** (page VS Code : intention + macro + extraits cliquables annotés par étape) : `add_step`,
   `get_walkthrough`, `delete_walkthrough`. Quand l'utilisateur demande une visite étape par
   étape (« baby steps », « explique-moi la PR »…), **lis `walkthrough.md`** (dans le même dossier
-  que ce fichier) avant de commencer : concision, granularité des extraits, modes, déroulé.
+  que ce fichier) avant de commencer : la visite est un ensemble d'**intentions** de l'issue/PR/prompt
+  (`walkthrough_goal`, `intent` par étape, macro + `note` par extrait), puis clarté, granularité
+  des extraits, modes, déroulé.
 
 ## Règles
 

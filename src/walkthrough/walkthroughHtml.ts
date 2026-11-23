@@ -123,6 +123,7 @@ function renderRef(ref: WalkRef): string {
       refLabel(ref),
     )}${ref.diff ? ' <span class="tag">diff</span>' : ''}</a>` +
     (ref.snippet ? `<div class="code" ${attrs}>${renderCode(ref)}</div>` : '') +
+    (ref.note ? `<p class="note"><em>${inline(ref.note)}</em></p>` : '') +
     '</div>'
   );
 }
@@ -132,6 +133,11 @@ function renderStep(step: WalkStep, i: number): string {
     `<section id="step-${i + 1}"><h2><span class="num">${
       i + 1
     }</span>${escapeHtml(step.title)}</h2>` +
+    (step.intent
+      ? `<p class="intent"><span class="tag">intention</span> ${inline(
+          step.intent,
+        )}</p>`
+      : '') +
     renderText(step.text) +
     step.refs.map(renderRef).join('') +
     '</section>'
@@ -143,7 +149,10 @@ export function renderWalkthroughBody(wt: Walkthrough): string {
   const meta = [wt.mode, wt.workspace_id].filter(Boolean).join(' · ');
   const head =
     `<h1>${escapeHtml(wt.title)}</h1>` +
-    (meta ? `<p class="meta">${escapeHtml(meta)}</p>` : '');
+    (meta ? `<p class="meta">${escapeHtml(meta)}</p>` : '') +
+    (wt.goal
+      ? `<p class="goal"><span class="tag">besoin</span> ${inline(wt.goal)}</p>`
+      : '');
   if (!wt.steps.length) {
     return `${head}<p class="meta">Aucune étape pour l’instant.</p>`;
   }
@@ -177,6 +186,8 @@ export function renderWalkthroughPage(
   h2 { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--vscode-panel-border); display: flex; gap: 10px; align-items: baseline; }
   .num { color: var(--se-accent, var(--vscode-textLink-foreground)); font-variant-numeric: tabular-nums; }
   .meta { color: var(--vscode-descriptionForeground); margin-top: 0; }
+  .goal, .intent { border-left: 3px solid var(--se-accent, var(--vscode-textLink-foreground)); padding: 4px 12px; margin: 12px 0; background: var(--vscode-textCodeBlock-background); }
+  .note { color: var(--vscode-descriptionForeground); margin: 4px 0 12px; padding: 6px 16px; font-size: 0.92em; }
   ol.toc { padding-left: 20px; color: var(--vscode-descriptionForeground); }
   a { color: var(--se-accent, var(--vscode-textLink-foreground)); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -225,6 +236,8 @@ export function renderWalkthroughPage(
   body.preset-notion .ref { border: 0; border-radius: 4px; background: var(--se-code-bg, var(--n-soft)); margin: 8px 0 16px; }
   body.preset-notion .ref > a.open { background: transparent; color: var(--n-muted); text-decoration: none; font-family: var(--se-code-font, "SFMono-Regular", Menlo, Consolas, monospace); font-size: 12px; padding: 8px 16px 0; }
   body.preset-notion .ref > a.open:hover { color: var(--n-text); }
+  body.preset-notion .goal, body.preset-notion .intent { border-left: 3px solid var(--n-red); background: var(--n-soft); border-radius: 3px; padding: 8px 14px; }
+  body.preset-notion .note { color: var(--n-muted); padding: 6px 16px; }
   body.preset-notion .tag { color: var(--n-muted); border-color: var(--n-line); }
   body.preset-notion .code { background: transparent; }
   body.preset-notion .code:hover { outline: 0; background: var(--n-chip); }

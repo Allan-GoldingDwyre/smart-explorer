@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ensureProjectDir, projectDataDir } from '../core/workspaceStore';
 
-export type WalkMode = 'flow' | 'changes' | 'review';
+export type WalkMode = 'flow' | 'changes' | 'review' | 'gap';
 
 // Zone de code citée par une étape. `snippet` est figé à la création : la page
 // reste lisible même si le code change ensuite.
@@ -22,12 +22,16 @@ export interface WalkRef {
   // Diff unifié au lieu du code (changement de petite taille).
   diff?: boolean;
   snippet?: string;
+  // Rôle de ce snippet dans l'intention de l'étape (une ligne).
+  note?: string;
 }
 
 export interface WalkStep {
   id: string;
   title: string;
-  // Explication concise (markdown).
+  // Intention de la demande (issue, PR ou prompt) que l'étape sert, avec sa source.
+  intent?: string;
+  // Macro (markdown) : pourquoi ces extraits, ensemble, réalisent l'intention.
   text: string;
   refs: WalkRef[];
   updated_at: string;
@@ -35,6 +39,8 @@ export interface WalkStep {
 
 export interface Walkthrough {
   title: string;
+  // Le besoin de départ (issue, PR ou prompt), affiché en tête de page.
+  goal?: string;
   mode?: WalkMode;
   workspace_id?: string;
   steps: WalkStep[];

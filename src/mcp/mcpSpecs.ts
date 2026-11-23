@@ -135,10 +135,21 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: 'add_step',
     description:
-      "Ajoute une étape à la visite guidée, affichée dans une page VS Code (onglet pleine largeur) : explication + extraits de code cliquables (un clic ouvre le fichier à la ligne). La première étape crée la visite (`walkthrough_title`, `mode`). Appelle-le étape après étape : la page se met à jour toute seule pendant que l'utilisateur lit. `text` = l'explication, 1 à 2 phrases (~40 mots), sans décrire ce que l'extrait montre. `refs` = les zones citées (au plus 4) : mêmes règles que focus (pas de `line` = lien vers le fichier seul ; `line` + `match` = point précis ; `line` + `end_line` = petite plage ≤ 25 lignes ; `diff` = rare, petit changement) ; l'extrait est figé à la création. L'utilisateur pose ses questions dans le terminal : réponds-lui ET mets l'étape concernée à jour en repassant son `step_id` (l'étape est remplacée sur place).",
+      "Ajoute une étape à la visite guidée, affichée dans une page VS Code (onglet pleine largeur). La visite est un ensemble d'INTENTIONS clés (celles de l'issue/PR/prompt), chacune appuyée par du code : une étape = une intention. La première étape crée la visite (`walkthrough_title`, `walkthrough_goal` = le besoin de départ avec sa source, `mode`). Appelle-le étape après étape : la page se met à jour pendant que l'utilisateur lit. `intent` (obligatoire) = l'ATTENTE de l'issue/PR/prompt que l'étape sert (pas un titre de section), citée avec sa source (ex. « #326 : ne plus dépendre de chrono »). `text` = le MACRO : pourquoi ces extraits, ensemble, réalisent cette intention (1 à 3 phrases, ~80 mots max ; le pourquoi et l'impact, pas la paraphrase du code). `refs` = les zones citées (au plus 4), chacune avec une `note` d'une ligne : son rôle dans l'intention (pas ce que fait chaque ligne). Zones : mêmes règles que focus (pas de `line` = lien vers le fichier seul ; `line` + `match` = point précis ; `line` + `end_line` = petite plage ≤ 25 lignes ; `diff` = rare, petit changement) ; extrait figé à la création. L'utilisateur pose ses questions dans le terminal : réponds-lui ET mets l'étape concernée à jour en repassant son `step_id` (remplacée sur place).",
     shape: {
-      title: z.string().describe("Titre court de l'étape"),
-      text: z.string().describe('Explication concise (markdown)'),
+      title: z
+        .string()
+        .describe("Titre court de l'étape (l'intention en quelques mots)"),
+      intent: z
+        .string()
+        .describe(
+          "Attente de l'issue/PR/prompt que cette étape sert, avec sa source",
+        ),
+      text: z
+        .string()
+        .describe(
+          'Macro (markdown) : pourquoi ces extraits ensemble réalisent l’intention',
+        ),
       refs: z
         .array(
           z.object({
@@ -147,6 +158,10 @@ export const TOOL_SPECS: ToolSpec[] = [
             end_line: z.number().int().min(1).optional(),
             match: z.string().optional(),
             diff: diffSchema,
+            note: z
+              .string()
+              .optional()
+              .describe("Rôle de cet extrait dans l'intention (une ligne)"),
           }),
         )
         .optional()
@@ -161,7 +176,13 @@ export const TOOL_SPECS: ToolSpec[] = [
         .string()
         .optional()
         .describe('Titre de la visite (ex. « PR #326 : chrono → jiff »)'),
-      mode: z.enum(['flow', 'changes', 'review']).optional(),
+      walkthrough_goal: z
+        .string()
+        .optional()
+        .describe(
+          'Le besoin de départ en 1 à 2 phrases, avec sa source (obligatoire sur la première étape)',
+        ),
+      mode: z.enum(['flow', 'changes', 'review', 'gap']).optional(),
       workspace_id: workspaceId.optional(),
     },
     run: (env, args) => addStepTool(env, args),
@@ -169,7 +190,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: 'get_walkthrough',
     description:
-      "Lit la visite guidée en cours : titre, mode, étapes (id, titre, texte, zones). À utiliser pour la reprendre ou pour retrouver le `step_id` à mettre à jour après une question de l'utilisateur.",
+      "Lit la visite guidée en cours : titre, besoin de départ, mode, étapes (id, titre, intention, texte, zones avec leur note). À utiliser pour la reprendre ou pour retrouver le `step_id` à mettre à jour après une question de l'utilisateur.",
     shape: {},
     run: (env) => getWalkthroughTool(env),
   },

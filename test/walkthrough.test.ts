@@ -37,11 +37,15 @@ test('add_step : la première étape crée la visite, le JSON est écrit', async
   const { root, env } = openRoot();
   write(root, 'src/a.ts', lines(40, 'a'));
   const first = await addStepTool(env, {
+    walkthrough_goal: 'Remplacer le parseur (#326)',
     title: 'Point d’entrée',
     text: 'La PR remplace le parseur ici.',
     walkthrough_title: 'PR #326 : parseur',
+    intent: '#326 : parseur unique',
     mode: 'changes',
-    refs: [{ path: './src/a.ts', line: 10, end_line: 12 }],
+    refs: [
+      { path: './src/a.ts', line: 10, end_line: 12, note: 'Le point d’entrée' },
+    ],
   });
   assert.equal(first.step_id, 'step-1');
   assert.equal(first.position, 1);
@@ -52,20 +56,34 @@ test('add_step : la première étape crée la visite, le JSON est écrit', async
   assert.equal(wt?.title, 'PR #326 : parseur');
   assert.equal(wt?.mode, 'changes');
   assert.deepEqual(wt?.steps[0].refs, [
-    { path: 'src/a.ts', start: 10, end: 12, snippet: 'a10\na11\na12' },
+    {
+      path: 'src/a.ts',
+      note: 'Le point d’entrée',
+      start: 10,
+      end: 12,
+      snippet: 'a10\na11\na12',
+    },
   ]);
 
   const page = renderWalkthroughBody(readWalkthrough(root)!);
   assert.match(page, /<h1>PR #326 : parseur<\/h1>/);
   assert.match(page, /<h2><span class="num">1<\/span>Point d’entrée<\/h2>/);
   assert.match(page, /La PR remplace le parseur ici\./);
+  assert.match(page, /<p class="goal">.*Remplacer le parseur \(#326\)/);
+  assert.match(page, /<p class="intent">.*#326 : parseur unique/);
+  assert.match(page, /<p class="note"><em>Le point d’entrée<\/em><\/p>/);
   // zone cliquable vers la ligne de début + extrait figé numéroté
   assert.ok(page.includes('data-path="src/a.ts" data-line="10" data-end="12"'));
   assert.ok(
     page.includes('<span class="n">11</span><span class="t">a11</span>'),
   );
 
-  const second = await addStepTool(env, { title: 'Suite', text: 'Puis ici.' });
+  const second = await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
+    title: 'Suite',
+    text: 'Puis ici.',
+  });
   assert.equal(second.step_id, 'step-2');
   assert.equal(second.total, 2);
   assert.equal(readWalkthrough(root)?.title, 'PR #326 : parseur'); // inchangé
@@ -74,9 +92,21 @@ test('add_step : la première étape crée la visite, le JSON est écrit', async
 test('add_step : step_id existant = étape remplacée sur place (mise à jour après une question)', async () => {
   const { root, env } = openRoot();
   write(root, 'src/a.ts', lines(10, 'a'));
-  await addStepTool(env, { title: 'Un', text: 'Texte 1' });
-  await addStepTool(env, { title: 'Deux', text: 'Texte 2' });
+  await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
+    title: 'Un',
+    text: 'Texte 1',
+  });
+  await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
+    title: 'Deux',
+    text: 'Texte 2',
+  });
   const updated = await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
     step_id: 'step-1',
     title: 'Un (précisé)',
     text: 'Texte 1 précisé',
@@ -89,9 +119,20 @@ test('add_step : step_id existant = étape remplacée sur place (mise à jour ap
   assert.deepEqual(wt?.steps.map((s) => s.title), ['Un (précisé)', 'Deux']);
   assert.equal(wt?.steps[0].refs[0].snippet, 'a2');
   // id libre fourni par l'agent
-  await addStepTool(env, { step_id: 'conclusion', title: 'Fin', text: 'ok' });
+  await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
+    step_id: 'conclusion',
+    title: 'Fin',
+    text: 'ok',
+  });
   assert.equal(readWalkthrough(root)?.steps.at(-1)?.id, 'conclusion');
-  const next = await addStepTool(env, { title: 'Après', text: 'x' });
+  const next = await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
+    title: 'Après',
+    text: 'x',
+  });
   assert.equal(next.step_id, 'step-3');
 });
 
@@ -99,6 +140,8 @@ test('add_step : zones (fichier entier, match, plafond), fichier introuvable, va
   const { root, env } = openRoot();
   write(root, 'src/a.ts', lines(100, 'a'));
   const res = await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
     title: 'Zones',
     text: 'x',
     refs: [
@@ -118,12 +161,20 @@ test('add_step : zones (fichier entier, match, plafond), fichier introuvable, va
   assert.match(res.notes?.join('\n') ?? '', /introuvable/);
 
   await assert.rejects(
-    () => addStepTool(env, { title: '', text: 'x' }),
+    () =>
+      addStepTool(env, {
+        intent: 'I',
+        walkthrough_goal: 'G',
+        title: '',
+        text: 'x',
+      }),
     /requis/,
   );
   await assert.rejects(
     () =>
       addStepTool(env, {
+        intent: 'I',
+        walkthrough_goal: 'G',
         title: 't',
         text: 'x',
         refs: Array.from({ length: 5 }, () => ({ path: 'src/a.ts' })),
@@ -131,11 +182,25 @@ test('add_step : zones (fichier entier, match, plafond), fichier introuvable, va
     /au plus 4/,
   );
   await assert.rejects(
-    () => addStepTool(env, { title: 't', text: 'x', refs: [{ path: '../x' }] }),
+    () =>
+      addStepTool(env, {
+        intent: 'I',
+        walkthrough_goal: 'G',
+        title: 't',
+        text: 'x',
+        refs: [{ path: '../x' }],
+      }),
     /chemin invalide/,
   );
   await assert.rejects(
-    () => addStepTool(env, { title: 't', text: 'x', workspace_id: 'nope' }),
+    () =>
+      addStepTool(env, {
+        intent: 'I',
+        walkthrough_goal: 'G',
+        title: 't',
+        text: 'x',
+        workspace_id: 'nope',
+      }),
     /introuvable/,
   );
 });
@@ -156,6 +221,8 @@ test('add_step : diff -> extrait du diff unifié', async () => {
   git('commit', '-qam', 'c2');
 
   await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
     title: 'Avant/après',
     text: 'Remplacement.',
     refs: [{ path: 'src/a.rs', line: 3, diff: { from: base, to: 'HEAD' } }],
@@ -171,7 +238,13 @@ test('add_step : diff -> extrait du diff unifié', async () => {
 test('add_step : workspace actif associé à la visite', async () => {
   const { root, env } = openRoot();
   const { workspace_id } = await createWorkspaceTool(env, { name: 'dispo' });
-  await addStepTool(env, { title: 't', text: 'x', workspace_id });
+  await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
+    title: 't',
+    text: 'x',
+    workspace_id,
+  });
   assert.equal(readWalkthrough(root)?.workspace_id, workspace_id);
 });
 
@@ -184,6 +257,8 @@ test('get_walkthrough / delete_walkthrough', async () => {
   });
   write(root, 'src/a.ts', lines(5, 'a'));
   await addStepTool(env, {
+    intent: 'I',
+    walkthrough_goal: 'G',
     title: 'Un',
     text: 'Texte',
     walkthrough_title: 'V',
@@ -196,8 +271,9 @@ test('get_walkthrough / delete_walkthrough', async () => {
     {
       id: 'step-1',
       title: 'Un',
+      intent: 'I',
       text: 'Texte',
-      refs: [{ path: 'src/a.ts', start: 2, end: 2 }],
+      refs: [{ path: 'src/a.ts', start: 2, end: 2, note: undefined }],
     },
   ]);
   assert.deepEqual(await deleteWalkthroughTool(env), {
@@ -237,4 +313,14 @@ test('rendu : tout est échappé (titre, texte, code), markdown minimal, page vi
   assert.ok(html.includes('if (a &lt; b) {}'));
   assert.ok(!html.includes('<b>'));
   assert.match(renderWalkthroughBody({ ...wt, steps: [] }), /Aucune étape/);
+});
+
+test('add_step : intent requis, goal requis sur la première étape', async () => {
+  const { env } = openRoot();
+  await assert.rejects(() =>
+    addStepTool(env, { title: 't', text: 'x', walkthrough_goal: 'G' } as never),
+  );
+  await assert.rejects(() =>
+    addStepTool(env, { title: 't', text: 'x', intent: 'I' }),
+  );
 });

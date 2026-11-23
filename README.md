@@ -67,7 +67,7 @@ Le skill (`skills/smart-explorer/SKILL.md`) décrit quand se charger et le workf
 
 Le fichier `skills/smart-explorer/walkthrough.md` (lu par l'agent à la demande, depuis le skill `smart-explorer`) décrit la **visite guidée du workspace actif, ancrée sur l'issue/PR** : une **page dans VS Code** (onglet pleine largeur, webview) :
 
-- **Une page par visite** : titre, puis pour chaque étape une explication concise et des **extraits de code cliquables** (un clic ouvre le fichier à la ligne dans l'éditeur). L'extrait est figé à la création de l'étape.
+- **Une page par visite** : titre et **besoin de départ** (issue, PR ou prompt), puis une étape par **intention** : l'attente servie, un macro (pourquoi ces extraits ensemble) et des **extraits de code cliquables**, chacun avec une note sur son rôle (un clic ouvre le fichier à la ligne dans l'éditeur). L'extrait est figé à la création de l'étape.
 - **Étapes en flux** : l'agent ajoute les étapes une à une avec `add_step` ; la page s'ouvre à la première (commande **Open Walkthrough**, ou bouton livre dans la vue) puis se met à jour toute seule pendant que tu lis. `get_walkthrough` relit l'état, `delete_walkthrough` repart de zéro.
 - **Questions** : tu les poses à l'agent dans le terminal ; il te répond et met l'étape concernée à jour (`add_step` avec son `step_id`, l'étape est remplacée sur place).
 - **Apparence** : preset `smartExplorer.walkthrough.preset` (`notion` par défaut, ou `vscode` pour reprendre les couleurs de ton thème), plus polices, tailles, largeur et couleurs réglables (`smartExplorer.walkthrough.*`). Les extraits sont colorés (highlight.js).

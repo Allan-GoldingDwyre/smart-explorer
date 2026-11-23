@@ -20,16 +20,22 @@ import { ToolEnv, err, nowIso, requireWorkspace } from './toolEnv';
 
 const MAX_REFS_PER_STEP = 4;
 
+// Zone citée + rôle de l'extrait dans l'intention de l'étape.
+export type WalkRefRequest = FocusTarget & { note?: string };
+
 // Extrait d'une zone de code (ou du diff) cité par une étape.
 async function buildRef(
   env: ToolEnv,
-  target: FocusTarget,
+  { note, ...target }: WalkRefRequest,
   notes: string[],
 ): Promise<WalkRef> {
   const prepared = await prepareFocus(env, target);
   notes.push(...prepared.notes.map((n) => `${target.path} : ${n}`));
   const { path: rel, line, end_line, match, diff } = prepared.target;
   const ref: WalkRef = { path: rel.replace(/\\/g, '/').replace(/^\.\//, '') };
+  if (note?.trim()) {
+    ref.note = note.trim();
+  }
   const abs = path.join(env.root, ref.path);
   let content: string;
   try {
@@ -91,15 +97,20 @@ export async function addStepTool(
   args: {
     title: string;
     text: string;
-    refs?: FocusTarget[];
+    intent: string;
+    refs?: WalkRefRequest[];
     step_id?: string;
     walkthrough_title?: string;
+    walkthrough_goal?: string;
     mode?: WalkMode;
     workspace_id?: string;
   },
 ): Promise<AddStepResult> {
   if (!args.title?.trim() || !args.text?.trim()) {
     err('title et text requis');
+  }
+  if (!args.intent?.trim()) {
+    err("intent requis : l'attente de l'issue/PR/prompt que cette étape sert");
   }
   const refs = args.refs ?? [];
   if (!Array.isArray(refs) || refs.length > MAX_REFS_PER_STEP) {
@@ -112,6 +123,9 @@ export async function addStepTool(
   }
   const now = nowIso(env);
   const existing = readWalkthrough(env.root);
+  if (!existing && !args.walkthrough_goal?.trim()) {
+    err('walkthrough_goal requis sur la première étape : le besoin de départ');
+  }
   const wt: Walkthrough = existing ?? {
     title: 'Visite guidée',
     steps: [],
@@ -122,6 +136,9 @@ export async function addStepTool(
   if (args.walkthrough_title?.trim()) {
     wt.title = args.walkthrough_title.trim();
   }
+  if (args.walkthrough_goal?.trim()) {
+    wt.goal = args.walkthrough_goal.trim();
+  }
   if (args.mode) {
     wt.mode = args.mode;
   }
@@ -130,6 +147,7 @@ export async function addStepTool(
   const step: WalkStep = {
     id: args.step_id?.trim() || nextStepId(wt),
     title: args.title.trim(),
+    intent: args.intent.trim(),
     text: args.text.trim(),
     refs: [],
     updated_at: now,
@@ -159,13 +177,15 @@ export async function addStepTool(
 export interface WalkthroughDetails {
   exists: boolean;
   title?: string;
+  goal?: string;
   mode?: WalkMode;
   workspace_id?: string;
   steps?: {
     id: string;
     title: string;
+    intent?: string;
     text: string;
-    refs: { path: string; start?: number; end?: number }[];
+    refs: { path: string; start?: number; end?: number; note?: string }[];
   }[];
 }
 
@@ -181,13 +201,20 @@ export async function getWalkthroughTool(
   return {
     exists: true,
     title: wt.title,
+    goal: wt.goal,
     mode: wt.mode,
     workspace_id: wt.workspace_id,
     steps: wt.steps.map((s) => ({
       id: s.id,
       title: s.title,
+      intent: s.intent,
       text: s.text,
-      refs: s.refs.map((r) => ({ path: r.path, start: r.start, end: r.end })),
+      refs: s.refs.map((r) => ({
+        path: r.path,
+        start: r.start,
+        end: r.end,
+        note: r.note,
+      })),
     })),
   };
 }
