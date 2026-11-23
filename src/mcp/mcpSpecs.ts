@@ -135,7 +135,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     name: 'add_step',
     description:
-      "Ajoute une étape à la visite guidée, affichée dans une page VS Code (onglet pleine largeur). La visite est un ensemble d'INTENTIONS clés (celles de l'issue/PR/prompt), chacune appuyée par du code : une étape = une intention. La première étape crée la visite (`walkthrough_title`, `walkthrough_goal` = le besoin de départ avec sa source, `mode`). Appelle-le étape après étape : la page se met à jour pendant que l'utilisateur lit. `intent` (obligatoire) = l'ATTENTE de l'issue/PR/prompt que l'étape sert (pas un titre de section), citée avec sa source (ex. « #326 : ne plus dépendre de chrono »). `text` = le MACRO : pourquoi ces extraits, ensemble, réalisent cette intention (1 à 3 phrases, ~80 mots max ; le pourquoi et l'impact, pas la paraphrase du code). `refs` = les zones citées (au plus 4), chacune avec une `note` d'une ligne : son rôle dans l'intention (pas ce que fait chaque ligne). Zones : mêmes règles que focus (pas de `line` = lien vers le fichier seul ; `line` + `match` = point précis ; `line` + `end_line` = petite plage ≤ 25 lignes ; `diff` = rare, petit changement) ; extrait figé à la création. L'utilisateur pose ses questions dans le terminal : réponds-lui ET mets l'étape concernée à jour en repassant son `step_id` (remplacée sur place).",
+      "Ajoute une étape à la visite guidée, affichée dans une page VS Code (onglet pleine largeur). La visite est un ensemble d'INTENTIONS clés (celles de l'issue/PR/prompt), chacune appuyée par du code : une étape = une intention. La première étape crée la visite (`walkthrough_title`, `walkthrough_goal` = le besoin de départ avec sa source, `mode`). Appelle-le étape après étape : la page se met à jour pendant que l'utilisateur lit. `intent` (obligatoire) = l'ATTENTE de l'issue/PR/prompt que l'étape sert (pas un titre de section), citée avec sa source (ex. « #326 : ne plus dépendre de chrono »). `text` = le MACRO : pourquoi ces extraits, ensemble, réalisent cette intention (1 à 3 phrases, ~80 mots max, ~60 dès que les extraits portent leur note ; le pourquoi et l'impact, pas la paraphrase du code). `refs` = les zones citées (au plus 4), un extrait = un texte : avec 2 extraits ou plus, chacun DOIT avoir une `note` (1 à 2 phrases, ~30 mots, affichée sous l'extrait) : ce qu'il apporte à l'intention (existant, manque, risque), pas ce que fait chaque ligne. Zones : mêmes règles que focus (pas de `line` = lien vers le fichier seul ; `line` + `match` = point précis ; `line` + `end_line` = petite plage ≤ 25 lignes ; `diff` = rare, petit changement) ; extrait figé à la création. L'utilisateur pose ses questions dans le terminal : réponds-lui ET mets l'étape concernée à jour en repassant son `step_id` (remplacée sur place).",
     shape: {
       title: z
         .string()
@@ -161,7 +161,9 @@ export const TOOL_SPECS: ToolSpec[] = [
             note: z
               .string()
               .optional()
-              .describe("Rôle de cet extrait dans l'intention (une ligne)"),
+              .describe(
+                "Ce que cet extrait apporte à l'intention (~30 mots) ; obligatoire dès 2 extraits",
+              ),
           }),
         )
         .optional()

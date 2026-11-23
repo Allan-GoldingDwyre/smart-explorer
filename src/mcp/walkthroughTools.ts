@@ -118,6 +118,13 @@ export async function addStepTool(
       `refs : au plus ${MAX_REFS_PER_STEP} zones par étape (une étape = une idée)`,
     );
   }
+  // Un extrait = un texte : dès 2 extraits de code, chacun porte sa note.
+  const snippets = refs.filter((r) => r.line || r.match);
+  if (snippets.length >= 2 && snippets.some((r) => !r.note?.trim())) {
+    err(
+      'refs : avec 2 extraits ou plus, chacun doit avoir sa `note` (~30 mots : ce qu’il apporte à l’intention)',
+    );
+  }
   if (args.workspace_id) {
     requireWorkspace(env, args.workspace_id);
   }

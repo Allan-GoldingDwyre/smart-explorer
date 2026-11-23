@@ -16,8 +16,12 @@ Besoin (walkthrough_goal)        ← le besoin de départ + sa source
 └─ Étape = une intention
    ├─ Intention (intent)         ← l'attente de la source servie ici, citée
    ├─ Macro (text)               ← pourquoi ces extraits, ENSEMBLE, la réalisent
-   └─ Extraits (refs[])          ← chacun avec une note : son rôle dans l'intention
+   └─ Extraits (refs[])          ← un extrait = un texte (note) juste après lui
 ```
+
+**Un extrait = un texte.** Dès qu'une étape montre plusieurs extraits, chacun porte sa `note` :
+ce que _cet_ endroit apporte à l'intention (« Existant : … », « Manque : … », « Garde-fou : … »).
+Le macro ne répète pas les notes : il dit seulement pourquoi les extraits vont **ensemble**.
 
 - **`walkthrough_goal`** (1re étape, obligatoire) : le besoin en 1 à 2 phrases, avec sa source.
   Issue/PR : « #326 : migrer de chrono vers jiff pour gérer les fuseaux ». Sans issue ni PR, la
@@ -27,9 +31,10 @@ Besoin (walkthrough_goal)        ← le besoin de départ + sa source
 - **`text`** = le **macro**. Avec plusieurs extraits : _pourquoi ces extraits, pris ensemble, sont
   ce qui réalise l'intention_ (le trio entrée → traitement → garde-fou, l'avant/après, etc.).
   Avec un seul extrait : pourquoi il répond à l'intention.
-- **`refs[].note`** (obligatoire dès qu'il y a plusieurs extraits) : **une ligne** = le **rôle** de
-  l'extrait dans l'intention (« point d'entrée », « là où le format est fixé », « ce qui empêche
-  la régression »). Pas ce que fait chaque ligne.
+- **`refs[].note`** (**obligatoire dès qu'il y a 2 extraits ou plus**, le serveur refuse sinon) :
+  1 à 2 phrases, **~30 mots maximum**, affichées en italique sous l'extrait. Le **rôle** de
+  l'extrait dans l'intention et ce qu'il y a à en retenir (existant, manque, risque), pas ce que
+  fait chaque ligne. Étape à un seul extrait : la note est facultative, le macro suffit.
 
 ## Écrire clair (règle n°1)
 
@@ -38,10 +43,13 @@ L'intention doit être **compréhensible seule** par quelqu'un qui n'a pas lu l'
 - **Test de clarté**, pour chaque étape : le lecteur sait-il (1) quelle attente est servie,
   (2) pourquoi ce code la sert ? Sinon, réécris.
 - Dis le **pourquoi** et l'**impact**, pas le _quoi_ : l'extrait montre déjà le code.
-- Macro : 1 à 3 phrases, **~80 mots maximum**, une seule intention. Note : 1 ligne. Réponse à une
-  question : 1 à 3 phrases.
-- **`intent` = une attente**, formulée comme telle (« les dates restent en UTC »), jamais un titre de
-  section de l'issue. **Le titre de l'étape = l'intention reformulée**, jamais un état du code
+- Macro : 1 à 3 phrases, **~80 mots maximum** ; **~60 mots (3/4)** quand les extraits portent
+  leurs notes (2 extraits ou plus), puisque le détail est dans les notes. Note : ~30 mots. Réponse à
+  une question : 1 à 3 phrases.
+- **Une étape = une seule idée** : un point secondaire (autre sujet repéré en chemin) va dans
+  l'étape « Couverture », pas dans le macro.
+- **`intent` = une attente**, formulée comme telle (« les dates restent en UTC »), **courte** (une
+  citation de la source, sans commentaire de ta part), jamais un titre de section de l'issue. **Le titre de l'étape = l'intention reformulée**, jamais un état du code
   (« save_cell : où brancher… »).
 - Pas de préambule, de paraphrase du code, de titres ni de longues listes dans une étape.
 - Vocabulaire du besoin, pas du code : « les dates restent en UTC », pas « `Timestamp` remplace
@@ -50,10 +58,11 @@ L'intention doit être **compréhensible seule** par quelqu'un qui n'a pas lu l'
 
 Mal : « Les champs passent de `DateTime<Utc>` à `Timestamp`, `Utc::now()` devient
 `Timestamp::now()`… » (le code le montre, et rien ne dit pourquoi).
-Bien — intention : « #326 : les dates restent en UTC ». Macro : « Ces trois endroits (définition,
-sérialisation, lecture) fixent ensemble le format : le défaut de jiff remplace le module maison. À
-vérifier : même rendu que l'ancien (Z, fraction sans zéros de fin). » Notes : « Le type », « Le
-format écrit », « Là où on relit ».
+Bien — intention : « #326 : les dates restent en UTC ». Macro : « Trois endroits fixent ensemble
+le format : le défaut de jiff remplace le module maison. » Notes : « Le type : `Timestamp` est
+toujours en UTC, plus de conversion à faire. », « Le format écrit : défaut de jiff. À vérifier :
+même rendu que l'ancien (Z, fraction sans zéros de fin). », « Là où on relit : accepte encore
+l'ancien format, donc rien à migrer. »
 
 ## Quoi citer (la granularité la plus fine)
 
@@ -122,8 +131,8 @@ Dans tous les modes, **une étape = une intention**, jamais un fichier.
    seulement si la question ouvre une nouvelle intention.
 6. **Clôture (obligatoire)** : parcours la source section par section et vérifie que **chaque
    intention est couverte**. Termine par une étape **« Couverture »** (son `intent` : « Ce que
-   la source demande, couvert ou non ») qui liste, en une ligne chacune, les intentions
-   **non traitées** dans la visite (et pourquoi : hors périmètre, reportée, oubliée) et les points
+   la source demande, couvert ou non ») qui liste **en liste à puces** (`- `), une ligne chacune,
+   les intentions **non traitées** dans la visite (et pourquoi : hors périmètre, reportée, oubliée) et les points
    à trancher. Rien à signaler : dis-le en une phrase. Une ligne de récap dans le terminal. La page reste ouverte ;
    `delete_walkthrough` seulement pour repartir de zéro.
 
@@ -137,8 +146,8 @@ saut technique) : les extraits de l'étape sont les maillons qui la servent, dan
 quoi l'issue/PR change ce maillon ou s'y appuie. Branches secondaires : une phrase.
 
 **changes** — une étape par **intention de la demande**, jamais par fichier ni par type technique.
-Macro : pourquoi les extraits retenus, ensemble, y répondent ; `note` : le rôle de chacun. Les
-autres endroits touchés, en une ligne dans le macro. Impact en une phrase.
+Macro : pourquoi les extraits retenus, ensemble, y répondent ; `note` : ce que chacun apporte à l'intention.
+Les autres endroits touchés, en une ligne dans le macro. Impact en une phrase.
 
 **gap** — la source existe, le code n'est pas (ou pas tout à fait) écrit : la visite sert de plan.
 Une étape par intention ; pour chacune dis **ce qui existe déjà** (« déjà fait » si c'est le cas),

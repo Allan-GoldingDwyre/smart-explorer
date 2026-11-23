@@ -123,7 +123,12 @@ function renderRef(ref: WalkRef): string {
       refLabel(ref),
     )}${ref.diff ? ' <span class="tag">diff</span>' : ''}</a>` +
     (ref.snippet ? `<div class="code" ${attrs}>${renderCode(ref)}</div>` : '') +
-    (ref.note ? `<p class="note"><em>${inline(ref.note)}</em></p>` : '') +
+    (ref.note
+      ? `<p class="note"><em>${inline(ref.note).replace(
+          /\n/g,
+          '<br>',
+        )}</em></p>`
+      : '') +
     '</div>'
   );
 }

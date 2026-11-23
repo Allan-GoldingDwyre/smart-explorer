@@ -146,11 +146,24 @@ test('add_step : zones (fichier entier, match, plafond), fichier introuvable, va
     text: 'x',
     refs: [
       { path: 'src/a.ts' }, // fichier entier : lien seul
-      { path: 'src/a.ts', line: 1, end_line: 90 }, // plafonné
-      { path: 'src/a.ts', line: 50, match: 'a7' }, // retrouvé par match
-      { path: 'src/absent.ts', line: 3 },
+      { path: 'src/a.ts', line: 1, end_line: 90, note: 'n' }, // plafonné
+      { path: 'src/a.ts', line: 50, match: 'a7', note: 'n' }, // retrouvé par match
+      { path: 'src/absent.ts', line: 3, note: 'n' },
     ],
   });
+  await assert.rejects(
+    () =>
+      addStepTool(env, {
+        intent: 'I',
+        title: 't',
+        text: 'x',
+        refs: [
+          { path: 'src/a.ts', line: 1, note: 'ok' },
+          { path: 'src/a.ts', line: 5 },
+        ],
+      }),
+    /note/,
+  );
   const [whole, clamped, matched, absent] =
     readWalkthrough(root)!.steps[0].refs;
   assert.deepEqual(whole, { path: 'src/a.ts' });
