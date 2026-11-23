@@ -37,11 +37,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # Copie au nom stable pour install.sh (gh refuse deux envois du même fichier).
+          cp "smart-explorer-${VERSION}.vsix" smart-explorer.vsix
           gh release create "$GITHUB_REF_NAME" \
             --title "smart-explorer $VERSION" \
             --notes "Extension VS Code (vsix), serveur MCP stdio autonome et skills. Installation : curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash" \
             "smart-explorer-${VERSION}.vsix" \
-            "smart-explorer-${VERSION}.vsix#smart-explorer.vsix" \
+            smart-explorer.vsix \
             skills.tar.gz \
             dist/smart-explorer-mcp.js \
             install.sh
