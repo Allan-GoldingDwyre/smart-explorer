@@ -30,7 +30,7 @@ jobs:
       - run: npm test
       - run: npm run build:mcp
       - run: npx vsce package
-      - run: tar -czf skills.tar.gz -C skills smart-explorer smart-explorer-baby-steps
+      - run: tar -czf skills.tar.gz -C skills smart-explorer
 
       - name: GitHub Release
         env:

@@ -138,7 +138,7 @@ uninstall() {
   fi
   [ -f "$VIBE_CONFIG" ] && vibe_config remove
   for root in "$HOME/.claude/skills" "$HOME/.vibe/skills"; do
-    for s in smart-explorer smart-explorer-baby-steps; do
+    for s in smart-explorer smart-explorer-baby-steps; do # (baby-steps : ancien skill, fusionné)
       [ -e "$root/$s" ] || [ -L "$root/$s" ] && rm -rf "${root:?}/$s"
     done
   done
@@ -203,6 +203,7 @@ fi
 install_skills() { # <dossier skills de l'agent>
   mkdir -p "$1"
   local s
+  rm -rf "${1:?}/smart-explorer-baby-steps" # ancien skill, fusionné dans smart-explorer
   for s in $(skill_names); do
     rm -rf "${1:?}/$s"
     cp -R "$SKILLS_SRC/$s" "$1/$s"

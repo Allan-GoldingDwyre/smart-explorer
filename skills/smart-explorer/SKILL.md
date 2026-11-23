@@ -1,11 +1,11 @@
 ---
 name: smart-explorer
-description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, get_workspace, create_workspace, build_tree, update_files, set_instructions, sync_workspace, apply_sync, check_workspace_files, export_context, reveal_file, stop_following, set_active_workspace, walkthrough_start, walkthrough_step, walkthrough_reply, walkthrough_wait, walkthrough_end). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code.
+description: Load when working on an issue or PR in a repo that has a Smart Explorer MCP server connected (tools list_workspaces, get_workspace, create_workspace, set_links, set_files, delete_workspace, set_active_workspace, focus, add_step, get_walkthrough, delete_walkthrough). Use it to select the files that matter for the user's task and show them as a flat, focused tree in VS Code, and for a guided step-by-step walkthrough ("baby steps", "guide-moi", "explique pas à pas", "explique-moi la PR/l'issue", "review guidée") shown as a page in VS Code with clickable code snippets — for the walkthrough, read walkthrough.md next to this file.
 ---
 
 # Smart Explorer — focus sur une issue / PR
 
-Smart Explorer garde, par tâche (issue, PR ou texte), la liste des **fichiers
+Smart Explorer garde, par tâche (une ou plusieurs issues, ou une PR), la liste des **fichiers
 pertinents** et l'affiche dans VS Code sous forme d'un arbre **plat** : tout ce qui
 compte d'un coup d'œil, sans descendre dans des chemins profonds.
 
@@ -17,20 +17,20 @@ fichiers des petits dossiers vers leur parent. Les vrais fichiers ne bougent jam
 
 1. **Lis la source toi-même** (issue/PR) : `gh pr view` / `gh pr diff`, `gh issue view`,
    ou l'outil web. Le serveur ne la récupère pas.
-2. `create_workspace` avec l'URL (ou le texte) et `instructions` = **le besoin de
-   l'utilisateur** sur cette issue/PR (« relire la migration serde », « corriger le bug
-   d'export »…). Ce n'est pas une consigne d'organisation de dossiers.
+2. `create_workspace` avec `links` : issues/PR GitHub ou Linear, en URL ou en forme courte
+   (`#123`, `owner/repo#123`, `ABC-123`). Issue ou PR est déterminé par `gh` ; un lien non
+   résolu est conservé (`unknown`) avec une note. Un workspace peut porter plusieurs issues,
+   puis une PR : quand la PR est créée, `set_links { add: ["#456"] }` l'ajoute sans toucher
+   aux issues (`remove` pour en retirer). Aucune instruction n'est stockée : le besoin de
+   l'utilisateur reste dans la conversation.
 3. Choisis les fichiers **pertinents pour ce besoin** : fichiers modifiés, plus ce qui
    est nécessaire pour les comprendre (appelants, types, tests concernés). Pas les
    dépendances transitives.
-4. `build_tree` avec `files` : la liste de chemins (relatifs à la racine du projet).
+4. `set_files` avec `files` : la liste de chemins (relatifs à la racine du projet).
    Ne construis pas d'arbre toi-même.
 5. `set_active_workspace` pour afficher le workspace dans la vue.
-6. Optionnel : passe `focus: { path, line?, match? }` à `build_tree` pour mettre en avant
-   le fichier/la ligne qui demande l'attention : VS Code l'ouvre à cet endroit et le
-   sélectionne dans l'arbre.
 
-Le résultat indique `mode`, `files_count`, `folders_count` et `missing_files` (chemins qui
+Le résultat indique `files_count`, `folders_count` et `missing_files` (chemins qui
 n'existent pas : corrige-les).
 
 ## Ce que fait la fusion (de bas en haut)
@@ -45,35 +45,31 @@ n'existent pas : corrige-les).
 
 ## Garder la main
 
-- Réglages de `build_tree` : `min_folder_files` élevé (ex. 99, avec `max_loose_files`
-  élevé) = **liste plate** ; `1` = arborescence réelle simplement compactée. Si
-  l'utilisateur demande une liste plate ou plus de structure, règle ces valeurs plutôt que
-  de réduire la liste de fichiers.
-- `tree` à la place de `files` : tu décides toi-même des dossiers et de la place de chaque
-  fichier (`{ files?, dirs?: [{ name, files?, dirs? }] }`). À réserver au cas où la
-  structure réelle ne reflète pas la logique de la tâche. Le serveur retire seulement les
-  doublons et les dossiers vides. Donne `files` OU `tree`, jamais les deux.
+- Réglages de `set_files` : `min_folder_files` élevé (ex. 99, avec `max_loose_files`
+  élevé) = **liste plate** ; `1` = arborescence réelle simplement compactée. Ils sont
+  conservés d'un appel à l'autre. Si l'utilisateur demande une liste plate ou plus de
+  structure, règle ces valeurs plutôt que de réduire la liste de fichiers.
+- Seuls les chemins de `files` (et les réglages) sont stockés : l'arbre n'existe pas sur
+  disque, il est recalculé par la fusion à chaque affichage. Tu ne choisis donc pas les
+  dossiers, seulement les fichiers.
 
 ## Évolution et maintenance
 
-- `update_files` (`add` / `remove`) pour ajuster sans tout renvoyer : avec un arbre
-  fusionné, la fusion est rejouée sur la nouvelle liste. Avec un arbre `tree`, `into`
-  désigne le dossier qui reçoit les fichiers ajoutés (créé si besoin, ex.
-  `"backend/storage"`) ; le reste de l'arbre est conservé.
-- `sync_workspace` → diff depuis `base_commit` (added / modified / deleted / renamed,
-  fichiers dont le hash a dérivé). `apply_sync` applique ce que l'utilisateur valide
-  (`accepted[]` / `rejected[]`) et remet `base_commit` à jour.
-- `get_workspace` lit un workspace (par défaut l'actif) : source, besoin de l'utilisateur
-  (`instructions`), fichiers et arbre.
-- `reveal_file` (`path`, `line?`, `end_line?`, `match?`, `workspace_id?`) met un fichier/une plage
+- `get_workspace` (par défaut l'actif) : liens, fichiers, arbre et fraîcheur `stale`
+  (fichiers supprimés, renommés, modifiés ou absents depuis `base_commit`, avec un `hint`).
+  **Il ne modifie rien** : c'est à toi de mettre à jour.
+- Mise à jour, du plus mécanique au plus fin : `set_files { sync: true }` suit les
+  renommages, retire les fichiers supprimés ou absents et avance `base_commit` ; puis, pour
+  les fichiers `modified` (à relire) ou nouveaux, `set_files { add, remove }`. `files`
+  remplace toute la liste ; `add` / `remove` l'ajustent (pas ensemble).
+- `delete_workspace` supprime un workspace.
+- `focus` (`path`, `line?`, `end_line?`, `match?`, `workspace_id?`) met un fichier/une plage
   en avant : VS Code l'ouvre à la ligne de début, surligne jusqu'à `end_line` et le sélectionne
-  dans l'arbre ; `stop_following` termine ce suivi.
-- Visite guidée dans VS Code (fils de commentaire, étapes en flux, réponses dans le fil) :
-  `walkthrough_start` / `walkthrough_step` / `walkthrough_wait` / `walkthrough_reply` /
-  `walkthrough_end`, décrits dans le skill `smart-explorer-baby-steps`.
-  Pour une visite guidée étape par étape, utilise le skill `smart-explorer-baby-steps`.
-- `check_workspace_files` → chemins introuvables + candidats (renommages).
-- `export_context` (`max_tokens?`) → contenu des fichiers du workspace.
+  dans l'arbre. Demande ponctuelle : rien à arrêter ensuite.
+- **Visite guidée** (page VS Code : explication + extraits cliquables par étape) : `add_step`,
+  `get_walkthrough`, `delete_walkthrough`. Quand l'utilisateur demande une visite étape par
+  étape (« baby steps », « explique-moi la PR »…), **lis `walkthrough.md`** (dans le même dossier
+  que ce fichier) avant de commencer : concision, granularité des extraits, modes, déroulé.
 
 ## Règles
 
