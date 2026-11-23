@@ -14,27 +14,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import YAML from 'yaml';
+import type { WorkspaceLink } from './links';
 
 const execFileAsync = promisify(execFile);
 
-export type SourceType = 'issue' | 'pr' | 'text';
-type Lifecycle = 'exploration' | 'issue' | 'branche' | 'pr' | 'mergée';
-
-interface SourceInfo {
-  type: SourceType;
-  url: string;
-  title?: string;
-}
-
-interface Freshness {
-  base_commit?: string;
-  synced_at?: string;
-  file_hashes?: Record<string, string>;
-}
-
 export interface VirtualDir {
   name: string;
-  icon?: string;
   files?: string[];
   dirs?: VirtualDir[];
 }
@@ -43,14 +28,14 @@ export interface WorkspaceFile {
   version: number;
   id: string;
   name?: string;
-  source: SourceInfo;
-  lifecycle?: Lifecycle;
-  instructions?: string[];
-  freshness?: Freshness;
-  tree?: VirtualDir;
-  // Présent quand l'arbre a été construit par fusion à partir d'une liste de
-  // fichiers (options utilisées, rejouées par update_files/apply_sync). Absent :
-  // arbre défini tel quel par l'agent.
+  // Issues et/ou PR (GitHub, Linear) auxquelles le workspace se rattache.
+  links?: WorkspaceLink[];
+  // Seuls les fichiers pertinents sont stockés (chemins relatifs, sans doublon) :
+  // l'arbre affiché est recalculé à la volée par fuseTree (déterministe).
+  files?: string[];
+  // HEAD au moment où la liste de fichiers a été validée (voir freshness.ts).
+  base_commit?: string;
+  // Options de fusion, uniquement si elles diffèrent des défauts.
   fusion?: { min_folder_files?: number; max_loose_files?: number };
 }
 
@@ -105,12 +90,13 @@ export function writeActive(root: string, id: string): void {
   fs.writeFileSync(activeFilePath(root), id);
 }
 
-// Suivi de l'agent (baby steps), à la Live Share : l'agent met un fichier/une
-// plage de lignes en avant (tool reveal_file / build_tree avec `focus`), le
-// serveur MCP l'écrit dans follow.json, l'extension le surveille (ouvre le
-// fichier, surligne, affiche la ligne « Following agent » dans la vue).
-// Au lieu du code actuel, montre le diff d'un fichier entre deux révisions.
-// `line`/`end_line` désignent alors le côté `side` (défaut : nouveau).
+// Mise en avant ponctuelle : l'agent désigne un fichier/une plage de lignes
+// (tool `focus`), le serveur MCP l'écrit dans focus.json, l'extension le
+// surveille et ouvre le fichier à cet endroit. Aucune session : chaque demande
+// est indépendante.
+//
+// Au lieu du code actuel, `diff` montre le diff d'un fichier entre deux
+// révisions ; `line`/`end_line` désignent alors le côté `side` (défaut : nouveau).
 export interface DiffRequest {
   from: string;
   // Défaut : l'arbre de travail (code actuel).
@@ -131,51 +117,22 @@ export interface FocusRequest {
   at: string;
 }
 
-// following : l'agent mène, la vue suit. ended : le suivi est terminé (l'agent
-// a appelé stop_following, l'utilisateur a cliqué sur Stop, ou la session est
-// périmée). Un nouveau reveal_file de l'agent relance toujours le suivi.
-type FollowStatus = 'following' | 'ended';
-
-export interface FollowState {
-  status: FollowStatus;
-  focus?: FocusRequest;
-  updated_at: string;
+export function focusFilePath(root: string): string {
+  return path.join(projectDataDir(root), 'focus.json');
 }
 
-// Une session sans activité depuis ce délai est considérée terminée.
-export const FOLLOW_IDLE_MS = 30 * 60 * 1000;
-
-export function followFilePath(root: string): string {
-  return path.join(projectDataDir(root), 'follow.json');
-}
-
-export function readFollow(
-  root: string,
-  now: Date = new Date(),
-): FollowState | undefined {
+export function readFocus(root: string): FocusRequest | undefined {
   try {
-    const data = JSON.parse(fs.readFileSync(followFilePath(root), 'utf8'));
-    if (!data || typeof data.status !== 'string') {
-      return undefined;
-    }
-    // Tout état autre que « following » (dont l'ancien « stopped ») = terminé.
-    const status: FollowStatus =
-      data.status === 'following' ? 'following' : 'ended';
-    const idle = now.getTime() - Date.parse(data.updated_at);
-    return { ...data, status: idle > FOLLOW_IDLE_MS ? 'ended' : status };
+    const data = JSON.parse(fs.readFileSync(focusFilePath(root), 'utf8'));
+    return data && typeof data.path === 'string' ? data : undefined;
   } catch {
     return undefined;
   }
 }
 
-export function writeFollow(
-  root: string,
-  state: Omit<FollowState, 'updated_at'>,
-  now: Date = new Date(),
-): void {
+export function writeFocus(root: string, focus: FocusRequest): void {
   ensureProjectDir(root);
-  const payload: FollowState = { ...state, updated_at: now.toISOString() };
-  fs.writeFileSync(followFilePath(root), JSON.stringify(payload));
+  fs.writeFileSync(focusFilePath(root), JSON.stringify(focus));
 }
 
 // Crée le dossier du projet et y note le chemin d'origine (sert à repérer
@@ -253,10 +210,9 @@ export function slugify(input: string): string {
 
 function parseWorkspaceYaml(content: string): WorkspaceFile {
   const doc = YAML.parse(content) as WorkspaceFile;
-  if (!doc || typeof doc !== 'object' || !doc.id || !doc.source) {
-    throw new Error('YAML de workspace invalide : champs id/source requis');
+  if (!doc || typeof doc !== 'object' || !doc.id) {
+    throw new Error('YAML de workspace invalide : champ id requis');
   }
-  doc.version = doc.version ?? 1;
   return doc;
 }
 
@@ -329,65 +285,11 @@ export function uniqueWorkspaceId(root: string, base: string): string {
 
 // --- Fichiers ---
 
-function hashContent(content: Buffer | string): string {
-  return 'sha256:' + createHash('sha256').update(content).digest('hex');
-}
-
-function hashFileContent(file: string): string {
-  return hashContent(fs.readFileSync(file));
-}
-
 export function fileExists(root: string, relPath: string): boolean {
   return fs.existsSync(path.join(root, relPath));
 }
 
-// Hash de contenu pour une liste de chemins relatifs (drift detection).
-export function computeFileHashes(
-  root: string,
-  relPaths: string[],
-): Record<string, string> {
-  const hashes: Record<string, string> = {};
-  for (const rel of relPaths) {
-    const abs = path.join(root, rel);
-    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-      hashes[rel] = hashFileContent(abs);
-    }
-  }
-  return hashes;
-}
-
-// Aplatit l'arbre virtuel en liste de chemins de fichiers.
-// Retire les fichiers en double d'un arbre : un fichier n'apparaît qu'une
-// fois, dans son dossier le plus profond (puis premier dans l'ordre). Les
-// dossiers qui se retrouvent vides sont supprimés.
-export function dedupeTree(dir: VirtualDir): VirtualDir {
-  return dedupeInto(dir, new Set());
-}
-
-function dedupeInto(dir: VirtualDir, seen: Set<string>): VirtualDir {
-  const out: VirtualDir = { ...dir };
-  const dirs = (dir.dirs ?? [])
-    .map((sub) => dedupeInto(sub, seen))
-    .filter((sub) => (sub.files?.length ?? 0) + (sub.dirs?.length ?? 0) > 0);
-  const files = (dir.files ?? []).filter((f) => {
-    const key = f.replace(/^\.\//, '');
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-  delete out.files;
-  delete out.dirs;
-  if (files.length) {
-    out.files = files;
-  }
-  if (dirs.length) {
-    out.dirs = dirs;
-  }
-  return out;
-}
-
+// Aplatit un arbre virtuel en liste de chemins de fichiers.
 export function flattenTreeFiles(dir: VirtualDir): string[] {
   const out: string[] = [...(dir.files ?? [])];
   for (const sub of dir.dirs ?? []) {
@@ -396,8 +298,8 @@ export function flattenTreeFiles(dir: VirtualDir): string[] {
   return out;
 }
 
-export function treeFiles(ws: WorkspaceFile): string[] {
-  return ws.tree ? flattenTreeFiles(ws.tree) : [];
+export function workspaceFiles(ws: WorkspaceFile): string[] {
+  return ws.files ?? [];
 }
 
 // --- Git ---

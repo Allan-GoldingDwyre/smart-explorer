@@ -2,7 +2,7 @@
   "name": "smart-explorer",
   "displayName": "Smart Explorer",
   "description": "A smarter file explorer panel for VS Code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.101.0"
   },
@@ -45,7 +45,7 @@
     "viewsWelcome": [
       {
         "view": "smartExplorerView",
-        "contents": "Aucun workspace pour ce projet.\n\nDemande à ton agent (serveur MCP Smart Explorer) de créer un workspace pour une issue ou une PR : create_workspace puis build_tree."
+        "contents": "Aucun workspace pour ce projet.\n\nDemande à ton agent (serveur MCP Smart Explorer) de créer un workspace pour une issue ou une PR : create_workspace puis set_files."
       }
     ],
     "commands": [
@@ -65,11 +65,6 @@
         "icon": "$(trash)"
       },
       {
-        "command": "smartExplorer.addInstruction",
-        "title": "Smart Explorer: Add Instruction",
-        "icon": "$(comment-add)"
-      },
-      {
         "command": "smartExplorer.revealInExplorer",
         "title": "Smart Explorer: Reveal in Explorer",
         "icon": "$(go-to-file)"
@@ -84,36 +79,9 @@
         "icon": "$(arrow-up)"
       },
       {
-        "command": "smartExplorer.followingAgent",
-        "title": "Smart Explorer: Go to the agent's position",
-        "icon": "$(eye)"
-      },
-      {
-        "command": "smartExplorer.stopFollowing",
-        "title": "Smart Explorer: Stop following agent",
-        "icon": "$(close)"
-      },
-      {
-        "command": "smartExplorer.followAgent",
-        "title": "Smart Explorer: Follow agent (resume)"
-      },
-      {
-        "command": "smartExplorer.walkthroughNext",
-        "title": "Continuer la visite",
-        "icon": "$(arrow-right)"
-      },
-      {
-        "command": "smartExplorer.walkthroughBack",
-        "title": "Étape précédente",
-        "icon": "$(arrow-left)"
-      },
-      {
-        "command": "smartExplorer.walkthroughReply",
-        "title": "Répondre"
-      },
-      {
-        "command": "smartExplorer.walkthroughSync",
-        "title": "Smart Explorer: Reload walkthrough"
+        "command": "smartExplorer.openWalkthrough",
+        "title": "Smart Explorer: Open Walkthrough",
+        "icon": "$(book)"
       }
     ],
     "keybindings": [
@@ -122,28 +90,13 @@
         "key": "f2",
         "mac": "enter",
         "when": "view == smartExplorerView && focusedView == smartExplorerView && viewItem =~ /^workspace-/ && !inputFocus"
-      },
-      {
-        "command": "smartExplorer.walkthroughNext",
-        "key": "ctrl+alt+right",
-        "when": "smartExplorer.walkthrough"
-      },
-      {
-        "command": "smartExplorer.walkthroughBack",
-        "key": "ctrl+alt+left",
-        "when": "smartExplorer.walkthrough"
-      },
-      {
-        "command": "smartExplorer.stopFollowing",
-        "key": "ctrl+alt+backspace",
-        "when": "smartExplorer.following"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "smartExplorer.stopFollowing",
-          "when": "view == smartExplorerView && smartExplorer.following",
+          "command": "smartExplorer.openWalkthrough",
+          "when": "view == smartExplorerView && smartExplorer.hasWalkthrough",
           "group": "navigation@0"
         },
         {
@@ -153,11 +106,6 @@
         }
       ],
       "view/item/context": [
-        {
-          "command": "smartExplorer.stopFollowing",
-          "when": "view == smartExplorerView && viewItem == following",
-          "group": "inline@1"
-        },
         {
           "command": "smartExplorer.activateWorkspace",
           "when": "view == smartExplorerOthers && viewItem =~ /^workspace-/",
@@ -179,54 +127,9 @@
           "group": "1_actions@1"
         },
         {
-          "command": "smartExplorer.addInstruction",
-          "when": "view =~ /^smartExplorer(View|Others)$/ && viewItem =~ /^workspace-/",
-          "group": "1_actions@2"
-        },
-        {
           "command": "smartExplorer.deleteWorkspace",
           "when": "view =~ /^smartExplorer(View|Others)$/ && viewItem =~ /^workspace-/",
           "group": "2_danger@1"
-        },
-        {
-          "command": "smartExplorer.stopFollowing",
-          "when": "view == smartExplorerView && viewItem == following",
-          "group": "1_following"
-        }
-      ],
-      "comments/commentThread/title": [
-        {
-          "command": "smartExplorer.walkthroughBack",
-          "group": "navigation@1",
-          "when": "commentController == smartExplorer"
-        },
-        {
-          "command": "smartExplorer.walkthroughNext",
-          "group": "navigation@2",
-          "when": "commentController == smartExplorer"
-        },
-        {
-          "command": "smartExplorer.stopFollowing",
-          "group": "navigation@3",
-          "when": "commentController == smartExplorer"
-        }
-      ],
-      "comments/commentThread/context": [
-        {
-          "command": "smartExplorer.walkthroughReply",
-          "group": "inline@1",
-          "when": "commentController == smartExplorer"
-        },
-        {
-          "command": "smartExplorer.walkthroughNext",
-          "group": "inline@2",
-          "when": "commentController == smartExplorer"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "smartExplorer.walkthroughReply",
-          "when": "false"
         }
       ]
     },
@@ -243,28 +146,6 @@
           "type": "boolean",
           "default": true,
           "description": "Sélectionne dans l'arbre Smart Explorer le fichier ouvert dans l'éditeur (s'il fait partie du workspace mis en avant)."
-        },
-        "smartExplorer.walkthrough.display": {
-          "type": "string",
-          "enum": [
-            "vscode",
-            "cli"
-          ],
-          "enumDescriptions": [
-            "Tout dans VS Code : explications en fils de commentaire, réponses dans le fil.",
-            "Focus et sélection dans VS Code ; explications dans le CLI, tu écris « go » pour continuer ou ta question."
-          ],
-          "default": "vscode",
-          "description": "Où se déroule la visite guidée : entièrement dans VS Code, ou focus/sélection dans VS Code avec les explications dans le CLI."
-        },
-        "smartExplorer.walkthrough.commentPosition": {
-          "type": "string",
-          "enum": [
-            "below",
-            "above"
-          ],
-          "default": "below",
-          "description": "Où afficher l'explication d'une étape de la visite guidée : sous le code visé (défaut) ou juste au-dessus."
         }
       }
     },
@@ -277,16 +158,6 @@
           "light": "#0066bf20",
           "highContrast": "#3794ff60",
           "highContrastLight": "#0066bf40"
-        }
-      },
-      {
-        "id": "smartExplorer.agentActive",
-        "description": "Couleur de la visite en cours (ligne « Following agent » et fichier de l'agent dans l'arbre).",
-        "defaults": {
-          "dark": "#ff9d2e",
-          "light": "#c25a00",
-          "highContrast": "#ff9d2e",
-          "highContrastLight": "#c25a00"
         }
       }
     ]

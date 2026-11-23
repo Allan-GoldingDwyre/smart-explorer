@@ -7,17 +7,11 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   VirtualDir,
-  computeFileHashes,
-  dedupeTree,
   dataHome,
   deleteWorkspace,
   listOrphanProjects,
   projectDataDir,
   readActive,
-  readFollow,
-  writeFollow,
-  FOLLOW_IDLE_MS,
-  followFilePath,
   gitDiffStat,
   gitDiffText,
   gitShow,
@@ -31,7 +25,7 @@ import {
   loadWorkspace,
   saveWorkspace,
   slugify,
-  treeFiles,
+  workspaceFiles,
   uniqueWorkspaceId,
   workspaceFilePath,
 } from '../src/core/workspaceStore';
@@ -71,20 +65,18 @@ test('slugify produit un kebab-case ascii', () => {
 test('save/load/list/delete workspace YAML', () => {
   const root = makeTempRoot();
   saveWorkspace(root, {
-    version: 1,
+    version: 2,
     id: 'my-ws',
     name: 'My WS',
-    source: { type: 'pr', url: 'https://github.com/o/r/pull/1', title: 'T' },
-    lifecycle: 'pr',
-    instructions: ['a', 'b'],
-    freshness: { base_commit: 'abc' },
-    tree: { name: '.', dirs: [{ name: 'A', files: ['src/a.ts'] }] },
+    links: [{ kind: 'github-pr', ref: 'o/r#1', title: 'T' }],
+    base_commit: 'abc',
+    files: ['src/a.ts'],
   });
   const loaded = loadWorkspace(root, 'my-ws');
   assert.equal(loaded?.name, 'My WS');
-  assert.equal(loaded?.source.type, 'pr');
-  assert.deepEqual(loaded?.instructions, ['a', 'b']);
-  assert.equal(loaded?.tree?.dirs?.[0].files?.[0], 'src/a.ts');
+  assert.equal(loaded?.links?.[0].kind, 'github-pr');
+  assert.equal(loaded?.base_commit, 'abc');
+  assert.deepEqual(loaded?.files, ['src/a.ts']);
   assert.deepEqual(
     listWorkspaces(root).map((w) => w.id),
     ['my-ws'],
@@ -99,9 +91,8 @@ test('uniqueWorkspaceId suffixe en cas de collision', () => {
   const root = makeTempRoot();
   assert.equal(uniqueWorkspaceId(root, 'Foo Bar'), 'foo-bar');
   saveWorkspace(root, {
-    version: 1,
+    version: 2,
     id: 'foo-bar',
-    source: { type: 'text', url: 'x' },
   });
   assert.equal(uniqueWorkspaceId(root, 'Foo Bar'), 'foo-bar-2');
 });
@@ -126,22 +117,13 @@ test('flattenTreeFiles', () => {
   ]);
 });
 
-test('computeFileHashes ne garde que les fichiers existants', () => {
-  const root = makeTempRoot();
-  write(root, 'src/a.ts', 'hello');
-  const hashes = computeFileHashes(root, ['src/a.ts', 'missing.ts']);
-  assert.ok(hashes['src/a.ts'].startsWith('sha256:'));
-  assert.equal('missing.ts' in hashes, false);
-});
-
-test('treeFiles aplati depuis WorkspaceFile.tree', () => {
+test('workspaceFiles : liste stockée, vide par défaut', () => {
   const ws = {
-    version: 1 as const,
+    version: 2,
     id: 'x',
-    source: { type: 'text' as const, url: 'u' },
-    tree: { name: '.', dirs: [{ name: 'D', files: ['f.ts'] }] },
   };
-  assert.deepEqual(treeFiles(ws), ['f.ts']);
+  assert.deepEqual(workspaceFiles(ws), []);
+  assert.deepEqual(workspaceFiles({ ...ws, files: ['f.ts'] }), ['f.ts']);
 });
 
 test('headCommit + diffNameStatus sur un vrai repo git', async () => {
@@ -180,31 +162,11 @@ test('headCommit + diffNameStatus sur un vrai repo git', async () => {
   assert.equal(renamed?.path, 'src/b.ts');
 });
 
-test('dedupeTree : un fichier une seule fois, dossier le plus profond prioritaire', () => {
-  const tree: VirtualDir = {
-    name: '.',
-    files: ['a.rs', './b.rs', 'd.rs'],
-    dirs: [
-      { name: 'x', files: ['b.rs', 'c.rs', 'c.rs'] },
-      { name: 'y', files: ['a.rs'] },
-      { name: 'vide', files: ['c.rs'] },
-    ],
-  };
-  const out = dedupeTree(tree);
-  assert.deepEqual(out.files, ['d.rs']);
-  assert.deepEqual(out.dirs, [
-    { name: 'x', files: ['b.rs', 'c.rs'] },
-    { name: 'y', files: ['a.rs'] },
-  ]);
-  assert.equal(flattenTreeFiles(out).length, 4);
-});
-
 test('les données vivent hors du projet (dossier de données utilisateur)', () => {
   const root = makeTempRoot();
   saveWorkspace(root, {
-    version: 1,
+    version: 2,
     id: 'w',
-    source: { type: 'text', url: 'u' },
   });
   assert.ok(workspaceFilePath(root, 'w').startsWith(dataHome()));
   assert.ok(projectDataDir(root).startsWith(path.join(dataHome(), 'projects')));
@@ -216,9 +178,8 @@ test('les données vivent hors du projet (dossier de données utilisateur)', () 
 test('projets orphelins : repérés puis supprimés', () => {
   const root = makeTempRoot();
   saveWorkspace(root, {
-    version: 1,
+    version: 2,
     id: 'w',
-    source: { type: 'text', url: 'u' },
   });
   const dir = projectDataDir(root); // calculé avant la suppression du projet
   assert.equal(
@@ -232,26 +193,6 @@ test('projets orphelins : repérés puis supprimés', () => {
   removeProjectData(orphan.dir);
   assert.equal(fs.existsSync(orphan.dir), false);
   assert.throws(() => removeProjectData(os.tmpdir()), /Refus/);
-});
-
-test('suivi : follow.json, état et expiration après inactivité', () => {
-  const root = makeTempRoot();
-  assert.equal(readFollow(root), undefined);
-  const t0 = new Date('2026-11-20T10:00:00Z');
-  writeFollow(
-    root,
-    {
-      status: 'following',
-      focus: { path: 'a.rs', line: 3, end_line: 5, at: t0.toISOString() },
-    },
-    t0,
-  );
-  assert.equal(readFollow(root, t0)?.status, 'following');
-  assert.equal(readFollow(root, t0)?.focus?.end_line, 5);
-  const later = new Date(t0.getTime() + FOLLOW_IDLE_MS + 1000);
-  assert.equal(readFollow(root, later)?.status, 'ended'); // session périmée
-  writeFollow(root, { status: 'ended' }, t0);
-  assert.equal(readFollow(root, later)?.status, 'ended');
 });
 
 test('gitShow / revExists : contenu d’un fichier à une révision', async () => {
@@ -269,16 +210,6 @@ test('gitShow / revExists : contenu d’un fichier à une révision', async () =
   assert.equal(await revExists(root, first), true);
   assert.equal(await revExists(root, 'HEAD~1'), true);
   assert.equal(await revExists(root, 'nope'), false);
-});
-
-test('suivi : un ancien état « stopped » est lu comme terminé', () => {
-  const root = makeTempRoot();
-  writeFollow(root, { status: 'ended' });
-  fs.writeFileSync(
-    followFilePath(root),
-    JSON.stringify({ status: 'stopped', updated_at: new Date().toISOString() }),
-  );
-  assert.equal(readFollow(root)?.status, 'ended');
 });
 
 test('gitDiffText / gitDiffStat : diff unifié et taille du changement', async () => {

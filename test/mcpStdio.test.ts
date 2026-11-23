@@ -99,30 +99,26 @@ test('serveur stdio : handshake + tools/list (18 tools) + tools/call', async () 
     const list = await rpc.send('tools/list');
     const names = list.result.tools.map((t: any) => t.name).sort();
     assert.deepEqual(names, [
-      'apply_sync',
-      'build_tree',
-      'check_workspace_files',
+      'add_step',
       'create_workspace',
-      'export_context',
+      'delete_walkthrough',
+      'delete_workspace',
+      'focus',
+      'get_walkthrough',
       'get_workspace',
       'list_workspaces',
-      'reveal_file',
       'set_active_workspace',
-      'set_instructions',
-      'stop_following',
-      'sync_workspace',
-      'update_files',
-      'walkthrough_end',
-      'walkthrough_reply',
-      'walkthrough_start',
-      'walkthrough_step',
-      'walkthrough_wait',
+      'set_files',
+      'set_links',
     ]);
 
     // tools/call : create_workspace puis list_workspaces
     const created = await rpc.send('tools/call', {
       name: 'create_workspace',
-      arguments: { source: 'https://github.com/o/r/pull/376', name: 'PR 376' },
+      arguments: {
+        links: ['https://github.com/o/r/pull/376'],
+        name: 'PR 376',
+      },
     });
     const createdText = created.result.content[0].text;
     assert.ok(createdText.includes('pr-376'));
@@ -138,21 +134,21 @@ test('serveur stdio : handshake + tools/list (18 tools) + tools/call', async () 
     assert.equal(listedData.workspaces.length, 1);
     assert.equal(listedData.workspaces[0].id, 'pr-376');
 
-    // build_tree puis export_context
+    // set_files puis get_workspace
     await rpc.send('tools/call', {
-      name: 'build_tree',
+      name: 'set_files',
       arguments: {
         workspace_id: 'pr-376',
-        tree: { files: ['src/a.ts'] },
+        files: ['src/a.ts'],
       },
     });
-    const exported = await rpc.send('tools/call', {
-      name: 'export_context',
+    const details = await rpc.send('tools/call', {
+      name: 'get_workspace',
       arguments: { workspace_id: 'pr-376' },
     });
-    const exportedData = JSON.parse(exported.result.content[0].text);
-    assert.deepEqual(exportedData.files, ['src/a.ts']);
-    assert.ok(exportedData.content.includes('export const a = 1;'));
+    const detailsData = JSON.parse(details.result.content[0].text);
+    assert.deepEqual(detailsData.files, ['src/a.ts']);
+    assert.equal(detailsData.links[0].kind, 'github-pr');
 
     // set_active_workspace écrit le fichier actif (lu par l'extension)
     await rpc.send('tools/call', {
@@ -174,7 +170,7 @@ test(
     try {
       await handshake(rpc);
       const list = await rpc.send('tools/list');
-      assert.equal(list.result.tools.length, 18);
+      assert.equal(list.result.tools.length, 11);
     } finally {
       rpc.close();
     }

@@ -1,15 +1,12 @@
-import type { SourceType } from './workspaceStore';
-
-type FileTreeNodeType = 'file' | 'virtualFolder';
-
 export interface FileTreeNode {
   name: string;
   // Chemin relatif depuis la racine du projet (vide pour un virtual folder).
   path: string;
-  type: FileTreeNodeType;
+  type: 'file' | 'virtualFolder';
 }
 
-export const TYPE_ICONS: Record<SourceType, string> = {
+// Nature d'un workspace d'après ses liens (voir workspaceKind).
+export const TYPE_ICONS: Record<'issue' | 'pr' | 'text', string> = {
   issue: 'issue-opened',
   pr: 'git-pull-request',
   text: 'note',

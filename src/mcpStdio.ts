@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Serveur MCP stdio pour clients externes (Vibe, Claude Code CLI, CLI Mistral).
 // Expose les mêmes tools que la version in-process de l'extension VS Code
-// (définitions partagées dans mcpSpecs.ts, logique dans mcpTools.ts).
+// (définitions partagées dans mcpSpecs.ts, logique dans workspaceTools.ts, focusTools.ts, walkthroughTools.ts).
 //
 // Racine du projet, par ordre de priorité :
 //   1. argument --root <path>
@@ -18,7 +18,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as path from 'path';
 import { TOOL_SPECS } from './mcp/mcpSpecs';
-import { ToolEnv } from './mcp/mcpTools';
+import type { ToolEnv } from './mcp/toolEnv';
 
 function resolveRoot(): string {
   const argIdx = process.argv.indexOf('--root');
@@ -39,7 +39,7 @@ function text(value: unknown) {
 
 async function main(): Promise<void> {
   const root = resolveRoot();
-  // Hors VS Code : pas de hooks UI (reveal_file retourne le chemin absolu ;
+  // Hors VS Code : pas de hooks UI (focus retourne le chemin absolu ;
   // set_active_workspace écrit le fichier lu par l'extension).
   const env: ToolEnv = { root };
   const server = new McpServer(

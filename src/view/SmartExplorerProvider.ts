@@ -1,25 +1,17 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { FOLLOWING_URI_SCHEME, SmartExplorerNode } from './SmartExplorerNode';
+import { SmartExplorerNode } from './SmartExplorerNode';
 import { TYPE_ICONS, truncate } from '../core/types';
+import { workspaceKind } from '../core/links';
+import { fuseTree } from '../core/treeFusion';
 import {
-  WalkSession,
-  isLiveSession,
-  readEvents,
-  readWalkthrough,
-  walkProgress,
-} from '../walkthrough/walkthrough';
-import {
-  FollowState,
   VirtualDir,
   WorkspaceFile,
-  dedupeTree,
   deleteWorkspace as deleteWorkspaceFile,
   listWorkspaces,
   readActive,
-  readFollow,
   saveWorkspace,
-  treeFiles,
+  workspaceFiles,
   writeActive,
 } from '../core/workspaceStore';
 
@@ -38,8 +30,6 @@ export class SmartExplorerProvider
   // Workspaces du projet ouvert (store YAML partagé avec les tools MCP).
   private workspaces: WorkspaceFile[] = [];
   private activeId?: string;
-  private follow?: FollowState;
-  private walk?: { session: WalkSession; current: number };
 
   constructor(private readonly section: ProviderSection = 'main') {
     this.reloadFromDisk();
@@ -54,24 +44,6 @@ export class SmartExplorerProvider
   reloadFromDisk(): void {
     const root = this.projectRoot();
     this.workspaces = root ? listWorkspaces(root) : [];
-    this.follow = root ? readFollow(root) : undefined;
-    // Visite guidée en cours : étape courante = celle du dernier événement.
-    const session = root ? readWalkthrough(root) : undefined;
-    this.walk =
-      root && session && isLiveSession(root, session)
-        ? {
-            session,
-            current: Math.min(
-              Math.max(
-                readEvents(root)
-                  .filter((e) => e.session === session.id)
-                  .at(-1)?.step ?? 1,
-                1,
-              ),
-              Math.max(session.steps.length, 1),
-            ),
-          }
-        : undefined;
     // Un actif périmé (workspace supprimé) est ignoré : la vue ne reste pas vide.
     const active = root ? readActive(root) : undefined;
     this.activeId = this.workspaces.some((w) => w.id === active)
@@ -144,24 +116,6 @@ export class SmartExplorerProvider
     this.refresh();
   }
 
-  async addInstruction(node: SmartExplorerNode): Promise<void> {
-    const ws = node.workspaceFile;
-    if (!ws) {
-      return;
-    }
-    const instruction = await vscode.window.showInputBox({
-      title: 'Add Instruction',
-      prompt: `Besoin lié au workspace "${ws.name ?? ws.id}"`,
-      placeHolder: 'Ex : relire la migration serde, ignorer les tests…',
-    });
-    if (!instruction) {
-      return;
-    }
-    ws.instructions = [...(ws.instructions ?? []), instruction];
-    this.persist(ws);
-    this.refresh();
-  }
-
   // Révèle le fichier dans le vrai panel Explorer (sélectionné dans l'arbre).
   async revealInExplorer(node: SmartExplorerNode): Promise<void> {
     const file = node.fileNode;
@@ -209,7 +163,7 @@ export class SmartExplorerProvider
   // Ids des workspaces dont l'arbre contient ce fichier.
   workspacesContaining(relPath: string): string[] {
     return this.workspaces
-      .filter((w) => treeFiles(w).includes(relPath))
+      .filter((w) => workspaceFiles(w).includes(relPath))
       .map((w) => w.id);
   }
 
@@ -259,116 +213,41 @@ export class SmartExplorerProvider
     const shown = this.workspaces.filter((w) =>
       this.section === 'main' ? w.id === active : w.id !== active,
     );
-    return [...this.followRow(), ...shown.map((w) => this.workspaceNode(w))];
-  }
-
-  // La ligne « Following agent » est-elle affichée ? (pilote le bouton Stop
-  // de la barre de titre et le raccourci clavier)
-  isFollowing(): boolean {
-    return this.followRow().length > 0;
-  }
-
-  // Ligne « Following agent » au-dessus du workspace actif tant que l'agent
-  // mène (disparaît quand l'agent ou l'utilisateur arrête le suivi).
-  private followRow(): SmartExplorerNode[] {
-    const walk = this.walk;
-    if (this.section === 'main' && walk && walk.session.steps.length > 0) {
-      const step = walk.session.steps[walk.current - 1];
-      const progress = walkProgress(walk.session);
-      return [
-        new SmartExplorerNode(
-          'Following agent',
-          vscode.TreeItemCollapsibleState.None,
-          {
-            id: 'following',
-            contextValue: 'following',
-            iconId: 'eye',
-            iconColor: 'smartExplorer.agentActive',
-            resourceUri: vscode.Uri.from({
-              scheme: FOLLOWING_URI_SCHEME,
-              path: '/agent',
-            }),
-            description: `étape ${walk.current}/${progress.total}${
-              progress.generating ? ' …' : ''
-            }`,
-            tooltip: `Visite guidée : ${
-              step?.title ?? ''
-            }\nCliquer pour revenir à l'étape, ✕ pour arrêter.`,
-            command: {
-              command: 'smartExplorer.followingAgent',
-              title: "Revenir à l'étape de l'agent",
-            },
-          },
-        ),
-      ];
-    }
-
-    const focus = this.follow?.focus;
-    if (
-      this.section !== 'main' ||
-      this.follow?.status !== 'following' ||
-      !focus
-    ) {
-      return [];
-    }
-    return [
-      new SmartExplorerNode(
-        'Following agent',
-        vscode.TreeItemCollapsibleState.None,
-        {
-          id: 'following',
-          contextValue: 'following',
-          iconId: 'eye',
-          iconColor: 'smartExplorer.agentActive',
-          // L'URI permet à la décoration orange de colorer le texte de la ligne.
-          resourceUri: vscode.Uri.from({
-            scheme: FOLLOWING_URI_SCHEME,
-            path: '/agent',
-          }),
-          description: `${path.basename(focus.path)}${
-            focus.line ? `:${focus.line}` : ''
-          }`,
-          tooltip: `Suit l'agent : ${focus.path}${
-            focus.line ? `:${focus.line}` : ''
-          }\nCliquer pour y revenir, ✕ pour arrêter le suivi.`,
-          command: {
-            command: 'smartExplorer.followingAgent',
-            title: "Aller à la position de l'agent",
-          },
-        },
-      ),
-    ];
+    return shown.map((w) => this.workspaceNode(w));
   }
 
   private workspaceNode(w: WorkspaceFile): SmartExplorerNode {
+    const kind = workspaceKind(w.links);
+    const refs = (w.links ?? []).map((l) => l.ref);
     return new SmartExplorerNode(
-      w.name ?? w.source.title ?? w.id,
+      w.name ?? w.links?.find((l) => l.title)?.title ?? w.id,
       this.section === 'main'
         ? vscode.TreeItemCollapsibleState.Expanded
         : vscode.TreeItemCollapsibleState.Collapsed,
       {
         id: `ws:${w.id}`,
-        contextValue: `workspace-${w.source.type}`,
-        iconId: TYPE_ICONS[w.source.type] ?? TYPE_ICONS.text,
-        description: truncate(w.source.url),
-        tooltip: [
-          `${w.source.type}: ${w.source.url}`,
-          ...(w.instructions ?? []),
-        ].join('\n'),
+        contextValue: `workspace-${kind}`,
+        iconId: TYPE_ICONS[kind],
+        description: refs.length ? truncate(refs.join(', ')) : undefined,
+        tooltip: (w.links ?? [])
+          .map((l) => `${l.kind}: ${l.ref}${l.title ? ` — ${l.title}` : ''}`)
+          .join('\n'),
         workspaceFile: w,
       },
     );
   }
 
-  // Enfants d'un workspace : l'arbre construit par l'agent (build_tree).
+  // Enfants d'un workspace : l'arbre est recalculé par fusion à partir des
+  // fichiers retenus (set_files), il n'est jamais stocké.
   private getWorkspaceChildren(
     ws: WorkspaceFile,
     parent: SmartExplorerNode,
   ): SmartExplorerNode[] {
-    if (!ws.tree) {
+    const files = workspaceFiles(ws);
+    if (!files.length) {
       return [
         new SmartExplorerNode(
-          'Aucun fichier — demande à l’agent d’appeler build_tree',
+          'Aucun fichier — demande à l’agent d’appeler set_files',
           vscode.TreeItemCollapsibleState.None,
           {
             id: `${parent.id}/info`,
@@ -379,21 +258,19 @@ export class SmartExplorerProvider
         ),
       ];
     }
-    return this.virtualDirChildren(dedupeTree(ws.tree), parent);
+    return this.virtualDirChildren(fuseTree(files, ws.fusion), parent);
   }
 
   // Virtual dir -> noeuds : dossiers d'abord, puis fichiers, chacun trié par
   // nom. Fichiers et virtual dirs délèguent au thème d'icônes de fichiers de
   // l'utilisateur via resourceUri (un virtual dir "tests" hérite donc de
-  // l'icône du dossier "tests" du thème actif). Un `icon` explicite du YAML
-  // reste prioritaire (codicon).
+  // l'icône du dossier "tests" du thème actif).
   private virtualDirChildren(
     dir: VirtualDir,
     parent: SmartExplorerNode,
   ): SmartExplorerNode[] {
     const nodes: SmartExplorerNode[] = [];
     for (const sub of byName(dir.dirs ?? [], (d) => d.name)) {
-      const icon = sub.icon?.trim();
       nodes.push(
         new SmartExplorerNode(
           sub.name,
@@ -402,8 +279,8 @@ export class SmartExplorerProvider
             id: `${parent.id}/${sub.name}`,
             parent,
             contextValue: 'virtualFolder',
-            iconId: icon || 'folder',
-            resourceUri: icon ? undefined : this.virtualDirUri(sub.name),
+            iconId: 'folder',
+            resourceUri: this.virtualDirUri(sub.name),
             fileNode: { name: sub.name, path: '', type: 'virtualFolder' },
             virtualDir: sub,
           },

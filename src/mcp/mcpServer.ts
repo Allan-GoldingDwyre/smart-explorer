@@ -1,7 +1,7 @@
 // Déclare le serveur MCP de l'extension auprès de VS Code (≥ 1.101) : VS Code
 // lance lui-même le serveur stdio livré dans le vsix (dist/smart-explorer-mcp.js)
 // et l'expose au chat (Chat → MCP Servers). Même binaire que pour les clients
-// externes : une seule implémentation (mcpStdio.ts / mcpTools.ts).
+// externes : une seule implémentation (mcpStdio.ts / mcpSpecs.ts).
 import * as vscode from 'vscode';
 
 const MCP_PROVIDER_ID = 'smartExplorer.mcp';

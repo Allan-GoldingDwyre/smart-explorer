@@ -8,29 +8,21 @@ import {
   workspaceForFile,
 } from './core/focus';
 import { registerMcpServer } from './mcp/mcpServer';
-import {
-  FOLLOWING_URI_SCHEME,
-  SmartExplorerNode,
-} from './view/SmartExplorerNode';
+import { SmartExplorerNode } from './view/SmartExplorerNode';
 import { SmartExplorerProvider } from './view/SmartExplorerProvider';
-import { WalkthroughController } from './walkthrough/walkthroughController';
-import {
-  walkthroughFilePath,
-  writeUiHeartbeat,
-} from './walkthrough/walkthrough';
+import { walkthroughMarkdownPath } from './walkthrough/walkthrough';
 import {
   DiffRequest,
-  FOLLOW_IDLE_MS,
   FocusRequest,
+  focusFilePath,
   gitDiffText,
   gitShow,
   listOrphanProjects,
   projectDataDir,
-  readFollow,
+  readFocus,
   removeProjectData,
   workspacesDir,
   writeActive,
-  writeFollow,
 } from './core/workspaceStore';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -50,6 +42,14 @@ export function activate(context: vscode.ExtensionContext) {
   // clients écrivent les YAML ; l'extension re-render via le watcher.
   registerMcpServer(context);
 
+  const walkPage = root ? walkthroughMarkdownPath(root) : undefined;
+  const setHasWalkthrough = () =>
+    vscode.commands.executeCommand(
+      'setContext',
+      'smartExplorer.hasWalkthrough',
+      !!walkPage && fs.existsSync(walkPage),
+    );
+
   const reload = () => {
     for (const p of [provider, othersProvider]) {
       p.reloadFromDisk();
@@ -60,17 +60,11 @@ export function activate(context: vscode.ExtensionContext) {
       'smartExplorer.hasOthers',
       othersProvider.othersCount() > 0,
     );
-    // Vraie tant que « Following agent » est affiché : bouton/raccourci Stop.
-    void vscode.commands.executeCommand(
-      'setContext',
-      'smartExplorer.following',
-      provider.isFollowing(),
-    );
   };
   reload();
+  void setHasWalkthrough();
 
-  // Journal de l'extension (Sortie -> « Smart Explorer ») : rend visibles les
-  // échecs de la visite guidée et du suivi.
+  // Journal de l'extension (Sortie -> « Smart Explorer »).
   const out = vscode.window.createOutputChannel('Smart Explorer');
   // ... et dans <dossier de données>/extension.log (lisible sans ouvrir VS Code).
   const logFile = root ? path.join(projectDataDir(root), 'extension.log') : '';
@@ -95,7 +89,6 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
   };
-  log(`API Comments : ${typeof vscode.comments?.createCommentController}`);
   log(
     `activation (version ${context.extension.packageJSON.version}, projet ${
       root ?? 'aucun'
@@ -103,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
   const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  // --- Suivi de l'agent (à la Live Share) et de l'éditeur ---
+  // --- Mise en avant demandée par l'agent (tool `focus`) ---
 
   // Diff UNIFIÉ en une seule vue (pas de côte à côte) : document virtuel
   // smart-explorer-diff:/<chemin>.diff?{root,path,from,to,from_path}
@@ -116,18 +109,13 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
   // Ce que l'agent met en avant, dans un document (fichier ou diff). `line` :
-  // ancre du CodeLens ; `range` : zone surlignée (absente = fichier entier).
+  // première ligne ; `range` : zone surlignée (absente = fichier entier).
   interface AgentMark {
     uri: string;
     line: number;
     range?: MarkRange;
   }
   let agentMark: AgentMark | undefined;
-  // Fichier du projet de la visite en cours : décoré en orange dans l'arbre
-  // (indépendant du fichier sélectionné).
-  let agentFileUri: string | undefined;
-  const lensChanged = new vscode.EventEmitter<void>();
-  const decorationsChanged = new vscode.EventEmitter<undefined>();
   const markColor = new vscode.ThemeColor(
     'smartExplorer.agentHighlightBackground',
   );
@@ -169,54 +157,6 @@ export function activate(context: vscode.ExtensionContext) {
           : [],
       );
     }
-    lensChanged.fire();
-  };
-  const setAgentMark = (mark?: AgentMark, fileUri?: string) => {
-    agentMark = mark;
-    agentFileUri = fileUri;
-    paintHighlight();
-    decorationsChanged.fire(undefined);
-  };
-
-  // Décorations orange : la ligne « Following agent » du panneau (texte) et le
-  // fichier de la visite dans l'arbre (texte + pastille).
-  const decorations: vscode.FileDecorationProvider = {
-    onDidChangeFileDecorations: decorationsChanged.event,
-    provideFileDecoration: (uri) => {
-      const color = new vscode.ThemeColor('smartExplorer.agentActive');
-      if (uri.scheme === FOLLOWING_URI_SCHEME) {
-        return new vscode.FileDecoration(undefined, undefined, color);
-      }
-      if (agentFileUri && uri.toString() === agentFileUri) {
-        return new vscode.FileDecoration(
-          '●',
-          'Fichier de la visite en cours (agent)',
-          color,
-        );
-      }
-      return undefined;
-    },
-  };
-
-  const lenses: vscode.CodeLensProvider = {
-    onDidChangeCodeLenses: lensChanged.event,
-    provideCodeLenses: (doc) => {
-      if (!agentMark || doc.uri.toString() !== agentMark.uri) {
-        return [];
-      }
-      const at = new vscode.Range(agentMark.line - 1, 0, agentMark.line - 1, 0);
-      return [
-        new vscode.CodeLens(at, {
-          title: '$(eye) Smart Explorer',
-          tooltip: "Suivi de l'agent : cliquer pour revenir ici",
-          command: 'smartExplorer.followingAgent',
-        }),
-        new vscode.CodeLens(at, {
-          title: 'Stop following',
-          command: 'smartExplorer.stopFollowing',
-        }),
-      ];
-    },
   };
 
   const revealInTree = async (relPath: string): Promise<boolean> => {
@@ -267,7 +207,7 @@ export function activate(context: vscode.ExtensionContext) {
         line: range?.startLine ?? 1,
         range,
       };
-      return { shown: fileUri, fileUri, mark };
+      return { shown: fileUri, mark };
     }
     const shown = diffUri(root, focus.path, diff);
     const text = await gitDiffText(
@@ -314,14 +254,14 @@ export function activate(context: vscode.ExtensionContext) {
           },
         }
       : { uri: shown.toString(), line: 1 };
-    return { shown, fileUri, mark };
+    return { shown, mark };
   };
 
-  // L'agent mène : bon workspace, document ouvert à la zone, zone surlignée et
-  // sélectionnée, fichier sélectionné (dossiers dépliés) dans l'arbre.
+  // Bon workspace, document ouvert à la zone, zone surlignée et sélectionnée,
+  // fichier sélectionné (dossiers dépliés) dans l'arbre.
   const showFocus = async (root: string, focus: FocusRequest) => {
     log(
-      `ouverture : ${focus.path}:${focus.line ?? '-'}${
+      `focus : ${focus.path}:${focus.line ?? '-'}${
         focus.diff ? ' (diff)' : ''
       }`,
     );
@@ -343,8 +283,8 @@ export function activate(context: vscode.ExtensionContext) {
     } catch (e) {
       log(`sélection dans l'arbre impossible (${errText(e)})`);
     }
-    const { shown, fileUri, mark } = await buildTarget(root, focus);
-    setAgentMark(mark, fileUri.toString());
+    const { shown, mark } = await buildTarget(root, focus);
+    agentMark = mark;
     const r = mark.range;
     const selection = r
       ? r.startCol !== undefined && r.endCol !== undefined
@@ -355,89 +295,40 @@ export function activate(context: vscode.ExtensionContext) {
     const editor = await vscode.window.showTextDocument(doc, { selection });
     editor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
     paintHighlight();
-    log(`ouvert : ${shown.toString()} (ligne ${mark.line})`);
-    return {
-      uri: shown,
-      line: mark.line,
-      endLine: mark.range?.endLine ?? mark.line,
-    };
   };
 
-  // État de suivi (follow.json), partagé avec l'agent : « following » affiche
-  // la ligne du panneau + le surlignage ; « ended » (l'agent a terminé, tu as
-  // cliqué sur Stop, ou plus d'activité depuis 30 min) les retire.
-  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-  const syncFollow = async (root: string, open: boolean) => {
-    const state = readFollow(root);
-    reload();
-    if (expiryTimer) {
-      clearTimeout(expiryTimer);
-      expiryTimer = undefined;
+  const onFocus = () => {
+    const focus = root ? readFocus(root) : undefined;
+    if (root && focus) {
+      showFocus(root, focus).catch((e) => {
+        log(`focus impossible : ${errText(e)}`);
+        void vscode.window.showWarningMessage(
+          `Smart Explorer : impossible d'ouvrir ${focus.path} (${errText(e)})`,
+        );
+      });
     }
-    if (state?.status === 'following' && state.focus) {
-      expiryTimer = setTimeout(
-        () => void syncFollow(root, false),
-        Math.max(
-          1000,
-          Date.parse(state.updated_at) + FOLLOW_IDLE_MS - Date.now() + 1000,
-        ),
+  };
+
+  // --- Page de la visite guidée (aperçu markdown natif) ---
+
+  // La page (walkthrough.md) est régénérée à chaque étape par le serveur ; à
+  // sa création on ouvre l'aperçu, qui se rafraîchit ensuite tout seul.
+  const openWalkthrough = async () => {
+    if (!walkPage || !fs.existsSync(walkPage)) {
+      void vscode.window.showInformationMessage(
+        "Smart Explorer : aucune visite guidée en cours (demande à l'agent de la lancer).",
       );
-      if (open) {
-        await showFocus(root, state.focus);
-      } else {
-        const { fileUri, mark } = await buildTarget(root, state.focus);
-        setAgentMark(mark, fileUri.toString());
-      }
-    } else if (!walkthrough?.active) {
-      // (pendant une visite guidée, le surlignage appartient à l'étape courante)
-      setAgentMark(undefined);
+      return;
     }
+    await vscode.commands.executeCommand(
+      'markdown.showPreviewToSide',
+      vscode.Uri.file(walkPage),
+    );
   };
 
-  // Visite guidée dans l'éditeur : fils de commentaire par étape (voir
-  // walkthroughController.ts). Chaque étape ouvre le fichier à la ligne visée.
-  const walkthrough = root
-    ? new WalkthroughController(root, {
-        showStep: (focus) => showFocus(root, focus),
-        log,
-        endFollow: async () => {
-          writeFollow(root, {
-            status: 'ended',
-            focus: readFollow(root)?.focus,
-          });
-          await syncFollow(root, false);
-        },
-        refresh: reload,
-      })
-    : undefined;
-
-  // Relecture de la visite : sur changement de walkthrough.json (watcher) ET par
-  // sondage (un renommage atomique peut échapper au watcher). Les erreurs sont
-  // journalisées, jamais silencieuses.
-  // Les relectures sont mises bout à bout : le watcher et le sondage peuvent
-  // se déclencher ensemble, et deux sync() concurrents créeraient deux fils.
-  let walkQueue: Promise<unknown> = Promise.resolve();
-  const syncWalk = () => {
-    walkQueue = walkQueue.then(() => {
-      log('visite guidée : relecture');
-      return walkthrough
-        ?.sync()
-        .then(() => log('visite guidée : relecture terminée'))
-        .catch((e) => {
-          log(`visite guidée : ERREUR ${errText(e)}`);
-          void vscode.window.showWarningMessage(
-            `Smart Explorer : visite guidée impossible (${errText(
-              e,
-            )}). Voir Sortie → Smart Explorer.`,
-          );
-        });
-    });
-    return walkQueue;
-  };
-
-  // Le fichier regardé (cmd+P, onglets, clic, reveal_file…) est sélectionné
-  // dans l'arbre ; si le workspace affiché ne le contient pas, on bascule sur
-  // celui qui le contient.
+  // Le fichier regardé (cmd+P, onglets, clic, focus…) est sélectionné dans
+  // l'arbre ; si le workspace affiché ne le contient pas, on bascule sur celui
+  // qui le contient.
   const syncTreeToEditor = async (editor: vscode.TextEditor | undefined) => {
     const follow = vscode.workspace
       .getConfiguration('smartExplorer')
@@ -458,13 +349,6 @@ export function activate(context: vscode.ExtensionContext) {
     out,
     highlightLines,
     highlightInline,
-    lensChanged,
-    vscode.languages.registerCodeLensProvider(
-      [{ scheme: 'file' }, { scheme: DIFF_SCHEME }],
-      lenses,
-    ),
-    vscode.window.registerFileDecorationProvider(decorations),
-    decorationsChanged,
     // Contenu du diff unifié d'un fichier entre deux révisions (une seule vue).
     vscode.workspace.registerTextDocumentContentProvider(DIFF_SCHEME, {
       provideTextDocumentContent: async (uri) => {
@@ -481,83 +365,37 @@ export function activate(context: vscode.ExtensionContext) {
     // Les données vivent hors du projet : on surveille leur dossier.
     const wsDir = vscode.Uri.file(workspacesDir(root));
     const projectDir = vscode.Uri.file(projectDataDir(root));
-    for (const watcher of [
-      vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(wsDir, '*.yaml'),
-      ),
-      vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(projectDir, 'active'),
-      ),
-    ]) {
-      watcher.onDidChange(reload);
-      watcher.onDidCreate(reload);
-      watcher.onDidDelete(reload);
+    const watch = (
+      base: vscode.Uri,
+      pattern: string,
+      handlers: { change?: () => void; create?: () => void; del?: () => void },
+    ) => {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(base, pattern),
+      );
+      if (handlers.change) watcher.onDidChange(handlers.change);
+      if (handlers.create) watcher.onDidCreate(handlers.create);
+      if (handlers.del) watcher.onDidDelete(handlers.del);
       disposables.push(watcher);
-    }
-    // Signal de vie : l'agent sait que VS Code est ouvert sur ce projet (il peut
-    // alors faire la visite ici plutôt que dans le terminal).
-    const beat = () =>
-      writeUiHeartbeat(
-        root,
-        new Date(),
-        vscode.workspace
-          .getConfiguration('smartExplorer')
-          .get<string>('walkthrough.display', 'vscode') === 'cli'
-          ? 'cli'
-          : 'vscode',
-      );
-    beat();
-    const heartbeat = setInterval(beat, 20_000);
-    disposables.push({ dispose: () => clearInterval(heartbeat) });
+    };
+    watch(wsDir, '*.yaml', { change: reload, create: reload, del: reload });
+    watch(projectDir, 'active', {
+      change: reload,
+      create: reload,
+      del: reload,
+    });
+    watch(projectDir, path.basename(focusFilePath(root)), {
+      change: onFocus,
+      create: onFocus,
+    });
+    watch(projectDir, path.basename(walkthroughMarkdownPath(root)), {
+      create: () => {
+        void setHasWalkthrough();
+        void openWalkthrough();
+      },
+      del: () => void setHasWalkthrough(),
+    });
     disposables.push(
-      vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('smartExplorer.walkthrough.display')) {
-          beat();
-        }
-      }),
-    );
-    if (walkthrough) {
-      const walkWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(projectDir, 'walkthrough.json'),
-      );
-      const onWalk = () => void syncWalk();
-      walkWatcher.onDidChange(onWalk);
-      walkWatcher.onDidCreate(onWalk);
-      walkWatcher.onDidDelete(onWalk);
-      let lastStamp = '';
-      const stamp = () => {
-        try {
-          return String(fs.statSync(walkthroughFilePath(root)).mtimeMs);
-        } catch {
-          return '';
-        }
-      };
-      const poll = setInterval(() => {
-        const now = stamp();
-        if (now !== lastStamp) {
-          lastStamp = now;
-          void syncWalk();
-        }
-      }, 2000);
-      disposables.push(walkWatcher, walkthrough, {
-        dispose: () => clearInterval(poll),
-      });
-    }
-    const followWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(projectDir, 'follow.json'),
-    );
-    const onFollow = () =>
-      syncFollow(root, true).catch((e) =>
-        vscode.window.showWarningMessage(
-          `Smart Explorer : suivi impossible (${
-            e instanceof Error ? e.message : e
-          })`,
-        ),
-      );
-    followWatcher.onDidChange(onFollow);
-    followWatcher.onDidCreate(onFollow);
-    disposables.push(
-      followWatcher,
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         syncTreeToEditor(editor).catch(() => undefined);
       }),
@@ -570,8 +408,6 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }),
     );
-    // Session déjà en cours à l'ouverture : on remet la ligne et le surlignage.
-    void syncFollow(root, false).then(() => syncWalk());
   }
 
   context.subscriptions.push(
@@ -579,74 +415,10 @@ export function activate(context: vscode.ExtensionContext) {
     othersView,
     ...disposables,
     vscode.commands.registerCommand('smartExplorer.refresh', reload),
-    vscode.commands.registerCommand('smartExplorer.walkthroughSync', () =>
-      syncWalk(),
-    ),
     vscode.commands.registerCommand(
-      'smartExplorer.walkthroughNext',
-      () => walkthrough?.next(),
+      'smartExplorer.openWalkthrough',
+      openWalkthrough,
     ),
-    vscode.commands.registerCommand(
-      'smartExplorer.walkthroughBack',
-      () => walkthrough?.back(),
-    ),
-    vscode.commands.registerCommand(
-      'smartExplorer.walkthroughReply',
-      (reply: vscode.CommentReply) => walkthrough?.reply(reply),
-    ),
-    vscode.commands.registerCommand(
-      'smartExplorer.followingAgent',
-      async () => {
-        if (await walkthrough?.revisit()) {
-          return;
-        }
-        const state = root ? readFollow(root) : undefined;
-        if (root && state?.status === 'following' && state.focus) {
-          await showFocus(root, state.focus);
-          return;
-        }
-        // Rien à suivre (visite arrêtée, suivi expiré…) : on le dit, et on
-        // propose de reprendre à la dernière position connue.
-        log('suivi : rien à suivre (aucune visite, suivi terminé ou expiré)');
-        const resume = 'Reprendre';
-        const choice = state?.focus
-          ? await vscode.window.showInformationMessage(
-              "Smart Explorer : le suivi de l'agent est terminé.",
-              resume,
-            )
-          : await vscode.window.showInformationMessage(
-              "Smart Explorer : l'agent n'a rien mis en avant pour l'instant.",
-            );
-        if (choice === resume) {
-          await vscode.commands.executeCommand('smartExplorer.followAgent');
-        }
-      },
-    ),
-    // L'utilisateur arrête le suivi : ligne du panneau et surlignage partent,
-    // et les prochains reveal de l'agent sont ignorés (il en est informé).
-    vscode.commands.registerCommand('smartExplorer.stopFollowing', async () => {
-      if (!root) {
-        return;
-      }
-      await walkthrough?.stop();
-      writeFollow(root, {
-        status: 'ended',
-        focus: readFollow(root)?.focus,
-      });
-      await syncFollow(root, false);
-    }),
-    // Reprend le suivi après un arrêt (dernière position de l'agent).
-    vscode.commands.registerCommand('smartExplorer.followAgent', async () => {
-      const state = root ? readFollow(root) : undefined;
-      if (!root || !state?.focus) {
-        vscode.window.showInformationMessage(
-          "Smart Explorer : l'agent n'a encore rien mis en avant.",
-        );
-        return;
-      }
-      writeFollow(root, { status: 'following', focus: state.focus });
-      await syncFollow(root, true);
-    }),
     vscode.commands.registerCommand(
       'smartExplorer.activateWorkspace',
       (node: SmartExplorerNode) => {
@@ -668,13 +440,6 @@ export function activate(context: vscode.ExtensionContext) {
       'smartExplorer.deleteWorkspace',
       async (node: SmartExplorerNode) => {
         await provider.deleteWorkspace(node);
-        reload();
-      },
-    ),
-    vscode.commands.registerCommand(
-      'smartExplorer.addInstruction',
-      async (node: SmartExplorerNode) => {
-        await provider.addInstruction(node);
         reload();
       },
     ),

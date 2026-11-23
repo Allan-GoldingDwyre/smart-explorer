@@ -8,16 +8,9 @@ import * as path from 'path';
 import { SmartExplorerProvider } from '../src/view/SmartExplorerProvider';
 import { SmartExplorerNode } from '../src/view/SmartExplorerNode';
 import {
-  appendEvent,
-  readWalkthrough,
-  writeWalkthrough,
-} from '../src/walkthrough/walkthrough';
-import {
-  VirtualDir,
   WorkspaceFile,
   listWorkspaces,
   saveWorkspace,
-  writeFollow,
   writeActive,
 } from '../src/core/workspaceStore';
 import {
@@ -36,14 +29,18 @@ function openProject(): string {
   return root;
 }
 
-function ws(id: string, tree?: VirtualDir): WorkspaceFile {
+function ws(
+  id: string,
+  files?: string[],
+  fusion?: WorkspaceFile['fusion'],
+): WorkspaceFile {
   return {
-    version: 1,
+    version: 2,
     id,
     name: id.toUpperCase(),
-    source: { type: 'pr', url: `https://github.com/o/r/pull/${id}` },
-    instructions: ['relire la migration'],
-    tree,
+    links: [{ kind: 'github-pr', ref: `o/r#${id}` }],
+    files,
+    fusion,
   };
 }
 
@@ -70,7 +67,7 @@ test('racine : projet sans workspace -> vue vide (welcome page)', async () => {
   assert.deepEqual(await rootNodes(new SmartExplorerProvider()), []);
 });
 
-test('workspace sans arbre : invite à appeler build_tree', async () => {
+test('workspace sans arbre : invite à appeler set_files', async () => {
   const root = openProject();
   saveWorkspace(root, ws('a'));
   const provider = new SmartExplorerProvider();
@@ -83,46 +80,36 @@ test('arbre virtuel : dossiers d’abord, puis fichiers, triés par nom, sans do
   const root = openProject();
   saveWorkspace(
     root,
-    ws('a', {
-      name: '.',
-      files: ['src/zeta.rs', 'lib/Alpha.rs', 'src/zeta.rs'],
-      dirs: [
-        { name: 'tests', files: ['t/b.rs', 't/a.rs'] },
-        { name: 'storage', files: ['s/x.rs'] },
+    ws(
+      'a',
+      [
+        'src/zeta.rs',
+        'lib/Alpha.rs',
+        'src/zeta.rs',
+        't/b.rs',
+        't/a.rs',
+        's/x.rs',
+        'README.md',
       ],
-    }),
+      { min_folder_files: 1 },
+    ),
   );
   const provider = new SmartExplorerProvider();
   const children = await provider.getChildren((await rootNodes(provider))[0]);
   assert.deepEqual(
     children.map((c) => c.label),
-    ['storage', 'tests', 'Alpha.rs', 'zeta.rs'],
+    ['lib', 's', 'src', 't', 'README.md'],
   );
   assert.equal(children[0].contextValue, 'virtualFolder');
   // Le virtual dir hérite de l'icône de dossier du thème via resourceUri.
-  assert.equal(path.basename(children[0].resourceUri!.fsPath), 'storage');
-  const files = await provider.getChildren(children[1]);
+  assert.equal(path.basename(children[0].resourceUri!.fsPath), 'lib');
+  const files = await provider.getChildren(children[3]);
   assert.deepEqual(
     files.map((f) => f.label),
     ['a.rs', 'b.rs'],
   );
   assert.equal(files[0].resourceUri!.fsPath, path.join(root, 't/a.rs'));
   assert.equal(files[0].command?.command, 'vscode.open');
-});
-
-test('virtual dir avec icon explicite : codicon, pas de resourceUri', async () => {
-  const root = openProject();
-  saveWorkspace(
-    root,
-    ws('a', {
-      name: '.',
-      dirs: [{ name: 'x', icon: 'beaker', files: ['x/a.rs'] }],
-    }),
-  );
-  const provider = new SmartExplorerProvider();
-  const [dir] = await provider.getChildren((await rootNodes(provider))[0]);
-  assert.equal((dir.iconPath as any).id, 'beaker');
-  assert.equal(dir.resourceUri, undefined);
 });
 
 test('renameWorkspace : met à jour le nom et persiste ; sans sélection -> no-op', async () => {
@@ -147,18 +134,6 @@ test('deleteWorkspace : confirmé -> supprimé ; annulé -> conservé', async ()
   await provider.deleteWorkspace((await rootNodes(provider))[0]);
   assert.equal(listWorkspaces(root).length, 0);
   assert.deepEqual(await rootNodes(provider), []);
-});
-
-test('addInstruction : ajoute le besoin au workspace', async () => {
-  const root = openProject();
-  saveWorkspace(root, ws('a'));
-  const provider = new SmartExplorerProvider();
-  inputQueue.push('ignorer les tests');
-  await provider.addInstruction((await rootNodes(provider))[0]);
-  assert.deepEqual(listWorkspaces(root)[0].instructions, [
-    'relire la migration',
-    'ignorer les tests',
-  ]);
 });
 
 test('plusieurs workspaces : le haut montre l’actif déplié, la vue du bas les autres repliés', async () => {
@@ -223,10 +198,7 @@ test('activateWorkspace : un workspace du bas devient l’actif', async () => {
 
 test('revealInExplorer : chemin du fichier virtuel ; no-op sur un dossier', async () => {
   const root = openProject();
-  saveWorkspace(
-    root,
-    ws('a', { name: '.', dirs: [{ name: 'd', files: ['w/b.py'] }] }),
-  );
+  saveWorkspace(root, ws('a', ['w/b.py', 'x/c.py'], { min_folder_files: 1 }));
   const provider = new SmartExplorerProvider();
   const folder = (
     await provider.getChildren((await rootNodes(provider))[0])
@@ -241,10 +213,7 @@ test('revealInExplorer : chemin du fichier virtuel ; no-op sur un dossier', asyn
 
 test('fichiers de même nom dans un virtual dir : le vrai dossier est affiché pour les distinguer', async () => {
   const root = openProject();
-  saveWorkspace(
-    root,
-    ws('a', { name: '.', files: ['src/a/mod.rs', 'src/b/mod.rs', 'src/c.rs'] }),
-  );
+  saveWorkspace(root, ws('a', ['src/a/mod.rs', 'src/b/mod.rs', 'src/c.rs']));
   const provider = new SmartExplorerProvider();
   const files = await provider.getChildren((await rootNodes(provider))[0]);
   assert.deepEqual(
@@ -262,18 +231,14 @@ test('noeuds : ids stables et parents, findFileNode retrouve un fichier du works
   const root = openProject();
   saveWorkspace(
     root,
-    ws('a', {
-      name: '.',
-      dirs: [{ name: 'storage', files: ['s/x.rs', 's/y.rs'] }],
-      files: ['r.md'],
-    }),
+    ws('a', ['s/x.rs', 's/y.rs', 'r.md'], { min_folder_files: 1 }),
   );
   const provider = new SmartExplorerProvider();
   const node = await provider.findFileNode('s/y.rs');
   assert.equal(node?.label, 'y.rs');
-  assert.equal(node?.id, 'ws:a/storage|s/y.rs');
+  assert.equal(node?.id, 'ws:a/s|s/y.rs');
   const folder = provider.getParent(node!);
-  assert.equal(folder?.label, 'storage');
+  assert.equal(folder?.label, 's');
   const workspace = provider.getParent(folder!);
   assert.equal(workspace?.id, 'ws:a');
   assert.equal(provider.getParent(workspace!), undefined);
@@ -287,124 +252,10 @@ test('noeuds : ids stables et parents, findFileNode retrouve un fichier du works
 
 test('workspacesContaining : ids des workspaces dont l’arbre contient le fichier', async () => {
   const root = openProject();
-  saveWorkspace(root, ws('a', { name: '.', files: ['x.rs', 'shared.rs'] }));
-  saveWorkspace(root, ws('b', { name: '.', files: ['y.rs', 'shared.rs'] }));
+  saveWorkspace(root, ws('a', ['x.rs', 'shared.rs']));
+  saveWorkspace(root, ws('b', ['y.rs', 'shared.rs']));
   const provider = new SmartExplorerProvider();
   assert.deepEqual(provider.workspacesContaining('x.rs'), ['a']);
   assert.deepEqual(provider.workspacesContaining('shared.rs'), ['a', 'b']);
   assert.deepEqual(provider.workspacesContaining('absent.rs'), []);
-});
-
-test('ligne « Following agent » : au-dessus du workspace actif, disparaît quand le suivi s’arrête', async () => {
-  const root = openProject();
-  saveWorkspace(root, ws('a', { name: '.', files: ['src/x.rs'] }));
-  saveWorkspace(root, ws('b'));
-  const main = new SmartExplorerProvider('main');
-  const others = new SmartExplorerProvider('others');
-  assert.equal((await rootNodes(main))[0].contextValue, 'workspace-pr');
-
-  writeFollow(root, {
-    status: 'following',
-    focus: { path: 'src/x.rs', line: 42, at: new Date().toISOString() },
-  });
-  main.reloadFromDisk();
-  others.reloadFromDisk();
-  const nodes = await rootNodes(main);
-  assert.equal(nodes.length, 2);
-  assert.equal(nodes[0].label, 'Following agent');
-  assert.equal(nodes[0].contextValue, 'following');
-  assert.equal(nodes[0].description, 'x.rs:42');
-  assert.equal(nodes[0].command?.command, 'smartExplorer.followingAgent');
-  // orange : couleur d'icône + URI sur laquelle s'accroche la décoration du texte
-  assert.equal(
-    (nodes[0].iconPath as any).color.id,
-    'smartExplorer.agentActive',
-  );
-  assert.equal(nodes[0].resourceUri?.scheme, 'smart-explorer-following');
-  assert.equal(nodes[1].contextValue, 'workspace-pr'); // le workspace actif juste dessous
-  assert.equal((await rootNodes(others)).length, 1); // pas de ligne dans la vue du bas
-
-  for (const status of ['ended'] as const) {
-    writeFollow(root, { status });
-    main.reloadFromDisk();
-    assert.deepEqual(
-      (await rootNodes(main)).map((n) => n.contextValue),
-      ['workspace-pr'],
-    );
-  }
-});
-
-test('visite guidée : la ligne « Following agent » affiche l’avancement (étape n/total)', async () => {
-  const root = openProject();
-  saveWorkspace(root, ws('a'));
-  const at = new Date().toISOString();
-  writeWalkthrough(root, {
-    id: 'wt-1',
-    mode: 'changes',
-    outline: ['A', 'B', 'C'],
-    steps: [
-      { n: 1, title: 'Première', text: 'x', path: 'a.rs', at },
-      { n: 2, title: 'Deuxième', text: 'y', path: 'b.rs', at },
-    ],
-    complete: false,
-    messages: [],
-    status: 'active',
-    updated_at: at,
-  });
-  const main = new SmartExplorerProvider('main');
-  let row = (await rootNodes(main))[0];
-  assert.equal(row.label, 'Following agent');
-  assert.equal(row.description, 'étape 1/3 …'); // génération en cours (plan de 3)
-
-  // l'utilisateur est passé à l'étape 2 (événement de navigation)
-  appendEvent(root, { session: 'wt-1', type: 'continue', step: 2 });
-  main.reloadFromDisk();
-  row = (await rootNodes(main))[0];
-  assert.equal(row.description, 'étape 2/3 …');
-
-  // visite terminée : plus de ligne
-  writeWalkthrough(root, {
-    ...readWalkthrough(root)!,
-    status: 'ended',
-    complete: true,
-  });
-  main.reloadFromDisk();
-  assert.equal((await rootNodes(main))[0].contextValue, 'workspace-pr');
-});
-
-test('Following agent : disparaît dès que l’utilisateur arrête ou que la visite est périmée, sans attendre l’agent', async () => {
-  const root = openProject();
-  saveWorkspace(root, ws('a'));
-  const at = new Date().toISOString();
-  const session = {
-    id: 'wt-9',
-    mode: 'flow' as const,
-    outline: [],
-    steps: [{ n: 1, title: 'T', text: 'x', path: 'a.rs', at }],
-    complete: false,
-    messages: [],
-    status: 'active' as const,
-    updated_at: at,
-  };
-  writeWalkthrough(root, session);
-  const main = new SmartExplorerProvider('main');
-  assert.equal(main.isFollowing(), true);
-  assert.equal((await rootNodes(main))[0].label, 'Following agent');
-
-  // l'utilisateur clique sur Stop : la session reste « active » sur disque
-  // (l'agent ne l'a pas traité) mais la ligne part immédiatement
-  appendEvent(root, { session: 'wt-9', type: 'stop', step: 1 });
-  main.reloadFromDisk();
-  assert.equal(readWalkthrough(root)?.status, 'active');
-  assert.equal(main.isFollowing(), false);
-  assert.equal((await rootNodes(main))[0].contextValue, 'workspace-pr');
-
-  // agent disparu : plus aucune écriture depuis plus de 45 min
-  writeWalkthrough(root, {
-    ...session,
-    id: 'wt-10',
-    updated_at: new Date(Date.now() - 46 * 60 * 1000).toISOString(),
-  });
-  main.reloadFromDisk();
-  assert.equal(main.isFollowing(), false);
 });

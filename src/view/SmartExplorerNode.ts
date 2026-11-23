@@ -2,13 +2,7 @@ import * as vscode from 'vscode';
 import { FileTreeNode } from '../core/types';
 import { VirtualDir, WorkspaceFile } from '../core/workspaceStore';
 
-// Schéma de l'URI de la ligne « Following agent » : la décoration orange du
-// panneau s'y accroche (voir extension.ts).
-export const FOLLOWING_URI_SCHEME = 'smart-explorer-following';
-
 export interface SmartExplorerNodeOptions {
-  // Couleur de thème de l'icône (ex. 'smartExplorer.agentActive').
-  iconColor?: string;
   // Identifiant stable (même élément = même id d'un rendu à l'autre) : permet
   // à TreeView.reveal de retrouver un noeud recréé.
   id?: string;
@@ -44,12 +38,7 @@ export class SmartExplorerNode extends vscode.TreeItem {
     this.parent = options.parent;
     this.contextValue = options.contextValue;
     this.iconPath = options.iconId
-      ? new vscode.ThemeIcon(
-          options.iconId,
-          options.iconColor
-            ? new vscode.ThemeColor(options.iconColor)
-            : undefined,
-        )
+      ? new vscode.ThemeIcon(options.iconId)
       : undefined;
     this.resourceUri = options.resourceUri;
     this.description = options.description;

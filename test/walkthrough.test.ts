@@ -1,385 +1,244 @@
 import './test-home';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
+import type { ToolEnv } from '../src/mcp/toolEnv';
 import {
-  ToolEnv,
-  createWorkspaceTool,
-  stopFollowingTool,
-  walkthroughEndTool,
-  walkthroughReplyTool,
-  walkthroughStartTool,
-  walkthroughStepTool,
-  walkthroughWaitTool,
-} from '../src/mcp/mcpTools';
+  addStepTool,
+  deleteWalkthroughTool,
+  getWalkthroughTool,
+} from '../src/mcp/walkthroughTools';
 import {
-  UI_ALIVE_MS,
-  WALK_STALE_MS,
-  isLiveSession,
-  appendEvent,
-  eventsFilePath,
-  isUiAlive,
-  readEvents,
+  Walkthrough,
+  languageOf,
   readWalkthrough,
-  threadMessages,
-  walkProgress,
-  writeUiHeartbeat,
+  renderWalkthrough,
+  walkthroughMarkdownPath,
 } from '../src/walkthrough/walkthrough';
-import { readFollow } from '../src/core/workspaceStore';
+import { createWorkspaceTool } from '../src/mcp/workspaceTools';
 
-const NOW = new Date('2026-11-20T10:00:00Z');
-
-function makeRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-walk-'));
-}
-
-function makeEnv(root: string): ToolEnv {
-  return { root, now: () => NOW, sleep: async () => undefined };
-}
-
-// Projet avec VS Code « ouvert » (signal de vie de l'extension).
 function openRoot(): { root: string; env: ToolEnv } {
-  const root = makeRoot();
-  writeUiHeartbeat(root, NOW);
-  return { root, env: makeEnv(root) };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-explorer-walk-'));
+  return { root, env: { root, now: () => new Date('2026-11-19T10:00:00Z') } };
 }
 
-test('signal de vie : VS Code est considéré ouvert pendant 60 s', () => {
-  const root = makeRoot();
-  assert.equal(isUiAlive(root, NOW), false);
-  writeUiHeartbeat(root, NOW);
-  assert.equal(isUiAlive(root, NOW), true);
-  assert.equal(
-    isUiAlive(root, new Date(NOW.getTime() + UI_ALIVE_MS + 1000)),
-    false,
-  );
-});
+function write(root: string, rel: string, content: string): void {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, content);
+}
 
-test('walkthrough_start : sans VS Code ouvert, ui:false et aucune visite créée', async () => {
-  const root = makeRoot();
-  const res = await walkthroughStartTool(makeEnv(root), { mode: 'changes' });
-  assert.equal(res.ok, false);
-  assert.equal(res.ui, false);
-  assert.match(res.note ?? '', /terminal/);
-  assert.equal(readWalkthrough(root), undefined);
-});
+const lines = (n: number, tag: string) =>
+  Array.from({ length: n }, (_, i) => `${tag}${i + 1}`).join('\n') + '\n';
 
-test('walkthrough_start / step / end : étapes poussées une à une, plan et avancement', async () => {
+test('add_step : la première étape crée la visite, la page markdown est écrite', async () => {
   const { root, env } = openRoot();
-  const start = await walkthroughStartTool(env, {
+  write(root, 'src/a.ts', lines(40, 'a'));
+  const first = await addStepTool(env, {
+    title: 'Point d’entrée',
+    text: 'La PR remplace le parseur ici.',
+    walkthrough_title: 'PR #326 : parseur',
     mode: 'changes',
-    title: 'PR 326',
-    outline: ['Dépendances', ' ', 'Serde', 'Tests'],
+    refs: [{ path: './src/a.ts', line: 10, end_line: 12 }],
   });
-  assert.equal(start.ok, true);
-  assert.equal(start.ui, true);
-  assert.equal(readWalkthrough(root)?.outline.length, 3); // titres vides ignorés
-  assert.deepEqual(walkProgress(readWalkthrough(root)!), {
-    ready: 0,
-    total: 3,
-    generating: true,
-  });
+  assert.equal(first.step_id, 'step-1');
+  assert.equal(first.position, 1);
+  assert.equal(first.total, 1);
+  assert.equal(first.created, true);
+  assert.equal(first.page, walkthroughMarkdownPath(root));
 
-  const s1 = await walkthroughStepTool(env, {
-    title: 'Dépendances',
-    text: 'chrono retiré, jiff ajouté.',
-    path: './Cargo.toml',
-    line: 39,
-  });
-  assert.equal(s1.n, 1);
-  assert.deepEqual(s1.pending_comments, []);
-  const s2 = await walkthroughStepTool(env, {
-    title: 'Serde',
-    text: 'Module sur mesure.',
-    path: 'src/a.rs',
-    line: 10,
-    end_line: 500, // plage énorme : plafonnée par le garde-fou
-  });
-  assert.equal(s2.n, 2);
-  assert.match(s2.notes?.join(' ') ?? '', /plafonnée/);
-  let session = readWalkthrough(root)!;
-  assert.equal(session.steps[0].path, 'Cargo.toml'); // ./ retiré
-  assert.equal(session.steps[1].end_line, 10 + 25 - 1);
-  assert.deepEqual(walkProgress(session), {
-    ready: 2,
-    total: 3,
-    generating: true,
-  });
+  const wt = readWalkthrough(root);
+  assert.equal(wt?.title, 'PR #326 : parseur');
+  assert.equal(wt?.mode, 'changes');
+  assert.deepEqual(wt?.steps[0].refs, [
+    { path: 'src/a.ts', start: 10, end: 12, snippet: 'a10\na11\na12' },
+  ]);
 
-  await walkthroughStepTool(env, {
-    title: 'Tests',
-    text: 'Tests adaptés.',
-    path: 'tests/a.rs',
-    last: true,
-  });
-  session = readWalkthrough(root)!;
-  assert.equal(session.complete, true);
-  assert.deepEqual(walkProgress(session), {
-    ready: 3,
-    total: 3,
-    generating: false,
-  });
+  const page = fs.readFileSync(walkthroughMarkdownPath(root), 'utf8');
+  assert.match(page, /^# PR #326 : parseur/);
+  assert.match(page, /## 1\. Point d’entrée/);
+  assert.match(page, /La PR remplace le parseur ici\./);
+  // lien cliquable vers la ligne de début + extrait figé
+  const url = pathToFileURL(path.join(root, 'src/a.ts')).href;
+  assert.ok(page.includes(`[\`src/a.ts:10-12\`](${url}#L10)`));
+  assert.ok(page.includes('```ts\na10\na11\na12\n```'));
 
-  assert.equal((await walkthroughEndTool(env)).was, 'active');
-  assert.equal(readWalkthrough(root)?.status, 'ended');
-  assert.equal(readFollow(root, NOW)?.status, 'ended');
-  await assert.rejects(
-    () => walkthroughStepTool(env, { title: 't', text: 'x', path: 'a' }),
-    /aucune visite en cours/,
-  );
+  const second = await addStepTool(env, { title: 'Suite', text: 'Puis ici.' });
+  assert.equal(second.step_id, 'step-2');
+  assert.equal(second.total, 2);
+  assert.equal(readWalkthrough(root)?.title, 'PR #326 : parseur'); // inchangé
 });
 
-test('walkthrough_step : champs requis', async () => {
-  const { env } = openRoot();
-  await walkthroughStartTool(env, { mode: 'flow' });
-  await assert.rejects(
-    () => walkthroughStepTool(env, { title: 'a', text: ' ', path: 'x' }),
-    /title et text/,
-  );
-  await assert.rejects(
-    () => walkthroughStepTool(env, { title: 'a', text: 'b', path: '' }),
-    /path requis/,
-  );
-});
-
-test('commentaires : pending_comments, reply dans le fil, messages ordonnés', async () => {
+test('add_step : step_id existant = étape remplacée sur place (mise à jour après une question)', async () => {
   const { root, env } = openRoot();
-  const { session } = await walkthroughStartTool(env, { mode: 'review' });
-  assert.ok(session);
-  await walkthroughStepTool(env, {
-    title: 'A',
-    text: 'Explication A.',
-    path: 'a.rs',
-    line: 3,
+  write(root, 'src/a.ts', lines(10, 'a'));
+  await addStepTool(env, { title: 'Un', text: 'Texte 1' });
+  await addStepTool(env, { title: 'Deux', text: 'Texte 2' });
+  const updated = await addStepTool(env, {
+    step_id: 'step-1',
+    title: 'Un (précisé)',
+    text: 'Texte 1 précisé',
+    refs: [{ path: 'src/a.ts', line: 2 }],
   });
+  assert.equal(updated.created, false);
+  assert.equal(updated.position, 1);
+  assert.equal(updated.total, 2);
+  const wt = readWalkthrough(root);
+  assert.deepEqual(wt?.steps.map((s) => s.title), ['Un (précisé)', 'Deux']);
+  assert.equal(wt?.steps[0].refs[0].snippet, 'a2');
+  // id libre fourni par l'agent
+  await addStepTool(env, { step_id: 'conclusion', title: 'Fin', text: 'ok' });
+  assert.equal(readWalkthrough(root)?.steps.at(-1)?.id, 'conclusion');
+  const next = await addStepTool(env, { title: 'Après', text: 'x' });
+  assert.equal(next.step_id, 'step-3');
+});
 
-  // l'utilisateur écrit dans le fil de l'étape 1 (côté extension)
-  const t1 = new Date('2026-11-20T10:01:00Z');
-  appendEvent(
-    root,
-    {
-      session,
-      type: 'comment',
-      step: 1,
-      thread: 'step-1',
-      text: 'Pourquoi un Option ?',
-    },
-    t1,
-  );
-  // l'agent, en train de générer l'étape suivante, voit le commentaire en attente
-  const s2 = await walkthroughStepTool(env, {
-    title: 'B',
-    text: 'Explication B.',
-    path: 'b.rs',
-  });
-  assert.equal(s2.pending_comments.length, 1);
-  assert.equal(s2.pending_comments[0].thread, 'step-1');
-  assert.equal(s2.pending_comments[0].text, 'Pourquoi un Option ?');
-
-  await assert.rejects(
-    () => walkthroughReplyTool(env, { thread: 'nimporte', text: 'x' }),
-    /thread invalide/,
-  );
-  await assert.rejects(
-    () => walkthroughReplyTool(env, { thread: 'step-1', text: ' ' }),
-    /text requis/,
-  );
-  // la réponse de l'agent est postérieure au commentaire de l'utilisateur
-  const later = { ...env, now: () => new Date('2026-11-20T10:02:00Z') };
-  await walkthroughReplyTool(later, {
-    thread: 'step-1',
-    text: 'Car le champ est facultatif.',
-  });
-
-  const msgs = threadMessages(
-    readWalkthrough(root)!,
-    readEvents(root),
-    'step-1',
-  );
-  assert.deepEqual(
-    msgs.map((m) => [m.author, m.text]),
-    [
-      ['agent', 'Explication A.'],
-      ['user', 'Pourquoi un Option ?'],
-      ['agent', 'Car le champ est facultatif.'],
+test('add_step : zones (fichier entier, match, plafond), fichier introuvable, validations', async () => {
+  const { root, env } = openRoot();
+  write(root, 'src/a.ts', lines(100, 'a'));
+  const res = await addStepTool(env, {
+    title: 'Zones',
+    text: 'x',
+    refs: [
+      { path: 'src/a.ts' }, // fichier entier : lien seul
+      { path: 'src/a.ts', line: 1, end_line: 90 }, // plafonné
+      { path: 'src/a.ts', line: 50, match: 'a7' }, // retrouvé par match
+      { path: 'src/absent.ts', line: 3 },
     ],
-  );
-  // un autre fil ne contient que son explication
-  assert.deepEqual(
-    threadMessages(readWalkthrough(root)!, readEvents(root), 'step-2').map(
-      (m) => m.text,
-    ),
-    ['Explication B.'],
-  );
-});
-
-test('walkthrough_wait : rend les commentaires, ignore la navigation, consomme une seule fois', async () => {
-  const { root, env } = openRoot();
-  const { session } = await walkthroughStartTool(env, { mode: 'flow' });
-  assert.ok(session);
-  await walkthroughStepTool(env, { title: 'A', text: 'a', path: 'a.rs' });
-
-  // navigation seule (continuer/précédent) : ne réveille pas l'agent
-  appendEvent(root, { session, type: 'continue', step: 2 }, NOW);
-  appendEvent(root, { session, type: 'back', step: 1 }, NOW);
-  const idle = await walkthroughWaitTool(env, { timeout_s: 1 });
-  assert.equal(idle.idle, true);
-  assert.deepEqual(idle.events, []);
-  assert.equal(idle.current_step, 1); // l'étape courante de l'utilisateur est connue
-  assert.equal(idle.steps_ready, 1);
-
-  // un commentaire réveille l'agent
-  appendEvent(
-    root,
-    {
-      session,
-      type: 'comment',
-      step: 1,
-      thread: 'step-1',
-      text: 'Et si c’est vide ?',
-    },
-    NOW,
-  );
-  const got = await walkthroughWaitTool(env, { timeout_s: 5 });
-  assert.equal(got.status, 'active');
-  assert.equal(got.idle, undefined);
-  assert.equal(got.events.length, 1);
-  assert.equal(got.events[0].text, 'Et si c’est vide ?');
-
-  // consommé : le prochain wait ne le rend plus
-  assert.equal((await walkthroughWaitTool(env, { timeout_s: 1 })).idle, true);
-
-  // l'utilisateur arrête : status ended, visite terminée
-  appendEvent(root, { session, type: 'stop', step: 1 }, NOW);
-  const stopped = await walkthroughWaitTool(env, { timeout_s: 5 });
-  assert.equal(stopped.status, 'ended');
-  assert.equal(stopped.events[0].type, 'stop');
-  assert.equal(readWalkthrough(root)?.status, 'ended');
-});
-
-test('walkthrough_wait : un commentaire posé pendant l’attente est vu au tour suivant', async () => {
-  const { root, env } = openRoot();
-  const { session } = await walkthroughStartTool(env, { mode: 'flow' });
-  assert.ok(session);
-  let calls = 0;
-  env.sleep = async () => {
-    calls++;
-    if (calls === 2) {
-      appendEvent(
-        root,
-        {
-          session,
-          type: 'comment',
-          step: 1,
-          thread: 'user-1',
-          text: 'Question',
-          path: 'x.rs',
-          line: 4,
-        },
-        NOW,
-      );
-    }
-  };
-  const res = await walkthroughWaitTool(env, { timeout_s: 30 });
-  assert.equal(res.events.length, 1);
-  assert.equal(res.events[0].thread, 'user-1');
-  assert.equal(res.events[0].path, 'x.rs');
-  assert.equal(res.events[0].line, 4);
-  assert.ok(calls >= 2 && calls < 10);
-});
-
-test('events : numéros de séquence croissants, lignes partielles ignorées', () => {
-  const root = makeRoot();
-  const a = appendEvent(root, { session: 's', type: 'continue', step: 2 }, NOW);
-  const b = appendEvent(root, { session: 's', type: 'continue', step: 3 }, NOW);
-  assert.deepEqual([a.seq, b.seq], [1, 2]);
-  fs.appendFileSync(eventsFilePath(root), '{"seq":3,"sess'); // écriture en cours
-  assert.equal(readEvents(root).length, 2);
-  assert.deepEqual(
-    readEvents(root, 1).map((e) => e.seq),
-    [2],
-  );
-});
-
-test('stop_following termine aussi la visite en cours', async () => {
-  const { root, env } = openRoot();
-  await createWorkspaceTool(env, { source: 'txt' });
-  await walkthroughStartTool(env, { mode: 'flow' });
-  await stopFollowingTool(env);
-  assert.equal(readWalkthrough(root)?.status, 'ended');
-});
-
-test('walkthrough_wait : visite terminée -> status ended sans bloquer', async () => {
-  const { env } = openRoot();
-  await walkthroughStartTool(env, { mode: 'flow' });
-  await walkthroughEndTool(env);
-  const res = await walkthroughWaitTool(env, { timeout_s: 30 });
-  assert.equal(res.status, 'ended');
-  assert.equal(res.idle, undefined);
-});
-
-test('arrêt par l’utilisateur pendant la génération : step et reply le signalent', async () => {
-  const { root, env } = openRoot();
-  const { session } = await walkthroughStartTool(env, { mode: 'flow' });
-  assert.ok(session);
-  await walkthroughStepTool(env, { title: 'A', text: 'a', path: 'a.rs' });
-  appendEvent(root, { session, type: 'stop', step: 1, text: 'arrêtée' }, NOW);
-  const next = await walkthroughStepTool(env, {
-    title: 'B',
-    text: 'b',
-    path: 'b.rs',
   });
-  assert.equal(next.stopped, true);
-  assert.match(next.note ?? '', /walkthrough_end/);
-  const rep = await walkthroughReplyTool(env, { thread: 'step-1', text: 'ok' });
-  assert.equal(rep.stopped, true);
-  // le wait rend l'arrêt puis la visite est terminée
-  const got = await walkthroughWaitTool(env, { timeout_s: 1 });
-  assert.equal(got.status, 'ended');
+  const [whole, clamped, matched, absent] =
+    readWalkthrough(root)!.steps[0].refs;
+  assert.deepEqual(whole, { path: 'src/a.ts' });
+  assert.equal(clamped.end! - clamped.start! + 1, 25);
+  assert.equal(matched.start, 70); // occurrence de `a7` la plus proche de la ligne 50
+  assert.equal(absent.snippet, undefined);
+  assert.match(res.notes?.join('\n') ?? '', /plafonnée à 25 lignes/);
+  assert.match(res.notes?.join('\n') ?? '', /introuvable/);
+
+  await assert.rejects(
+    () => addStepTool(env, { title: '', text: 'x' }),
+    /requis/,
+  );
+  await assert.rejects(
+    () =>
+      addStepTool(env, {
+        title: 't',
+        text: 'x',
+        refs: Array.from({ length: 5 }, () => ({ path: 'src/a.ts' })),
+      }),
+    /au plus 4/,
+  );
+  await assert.rejects(
+    () => addStepTool(env, { title: 't', text: 'x', refs: [{ path: '../x' }] }),
+    /chemin invalide/,
+  );
+  await assert.rejects(
+    () => addStepTool(env, { title: 't', text: 'x', workspace_id: 'nope' }),
+    /introuvable/,
+  );
 });
 
-test('isLiveSession : active, ni périmée ni arrêtée par l’utilisateur', async () => {
+test('add_step : diff -> extrait du diff unifié', async () => {
   const { root, env } = openRoot();
-  const { session } = await walkthroughStartTool(env, { mode: 'flow' });
-  assert.ok(session);
-  const s = readWalkthrough(root)!;
-  assert.equal(isLiveSession(root, s, NOW), true);
-  // périmée : l'agent a disparu (aucune écriture depuis 45 min)
-  const later = new Date(NOW.getTime() + WALK_STALE_MS + 1000);
-  assert.equal(isLiveSession(root, s, later), false);
-  // terminée
-  assert.equal(isLiveSession(root, { ...s, status: 'ended' }, NOW), false);
-  // arrêtée par l'utilisateur : n'attend pas que l'agent traite l'événement
-  appendEvent(root, { session, type: 'stop', step: 1 }, NOW);
-  assert.equal(isLiveSession(root, s, NOW), false);
-  // le stop d'une AUTRE visite ne compte pas
-  const other = { ...s, id: 'wt-autre' };
-  assert.equal(isLiveSession(root, other, NOW), true);
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.email', 't@example.com');
+  git('config', 'user.name', 'T');
+  git('config', 'commit.gpgsign', 'false');
+  write(root, 'src/a.rs', lines(10, 'a'));
+  git('add', '.');
+  git('commit', '-qm', 'c1');
+  const base = git('rev-parse', 'HEAD');
+  write(root, 'src/a.rs', lines(10, 'a').replace('a3', 'CHANGED'));
+  git('commit', '-qam', 'c2');
+
+  await addStepTool(env, {
+    title: 'Avant/après',
+    text: 'Remplacement.',
+    refs: [{ path: 'src/a.rs', line: 3, diff: { from: base, to: 'HEAD' } }],
+  });
+  const ref = readWalkthrough(root)!.steps[0].refs[0];
+  assert.equal(ref.diff, true);
+  assert.match(ref.snippet!, /^@@ /);
+  assert.match(ref.snippet!, /-a3\n\+CHANGED/);
+  const page = fs.readFileSync(walkthroughMarkdownPath(root), 'utf8');
+  assert.ok(page.includes('```diff\n@@'));
 });
 
-test('walkthrough_wait : prouve que l’agent est vivant en rafraîchissant updated_at', async () => {
-  const { root } = openRoot();
-  let tick = 0;
-  const env: ToolEnv = {
-    root,
-    // horloge qui avance à chaque lecture : chaque écriture a un horodatage différent
-    now: () => new Date(NOW.getTime() + tick++ * 1000),
-    sleep: async () => undefined,
-  };
-  await walkthroughStartTool(env, { mode: 'flow' });
-  const before = readWalkthrough(root)!.updated_at;
-  await walkthroughWaitTool(env, { timeout_s: 200 }); // plusieurs minutes simulées
-  assert.notEqual(readWalkthrough(root)!.updated_at, before);
+test('add_step : workspace actif associé à la visite', async () => {
+  const { root, env } = openRoot();
+  const { workspace_id } = await createWorkspaceTool(env, { name: 'dispo' });
+  await addStepTool(env, { title: 't', text: 'x', workspace_id });
+  assert.equal(readWalkthrough(root)?.workspace_id, workspace_id);
 });
 
-test('walkthrough_start : réglage display=cli → pas de session, VS Code sert au focus', async () => {
-  const root = makeRoot();
-  writeUiHeartbeat(root, NOW, 'cli');
-  const res = await walkthroughStartTool(makeEnv(root), { mode: 'changes' });
-  assert.equal(res.ok, true);
-  assert.equal(res.ui, false);
-  assert.equal(res.display, 'cli');
+test('get_walkthrough / delete_walkthrough', async () => {
+  const { root, env } = openRoot();
+  assert.deepEqual(await getWalkthroughTool(env), { exists: false });
+  assert.deepEqual(await deleteWalkthroughTool(env), {
+    ok: true,
+    deleted: false,
+  });
+  write(root, 'src/a.ts', lines(5, 'a'));
+  await addStepTool(env, {
+    title: 'Un',
+    text: 'Texte',
+    walkthrough_title: 'V',
+    refs: [{ path: 'src/a.ts', line: 2 }],
+  });
+  const got = await getWalkthroughTool(env);
+  assert.equal(got.exists, true);
+  assert.equal(got.title, 'V');
+  assert.deepEqual(got.steps, [
+    {
+      id: 'step-1',
+      title: 'Un',
+      text: 'Texte',
+      refs: [{ path: 'src/a.ts', start: 2, end: 2 }],
+    },
+  ]);
+  assert.equal(got.page, walkthroughMarkdownPath(root));
+  assert.deepEqual(await deleteWalkthroughTool(env), {
+    ok: true,
+    deleted: true,
+  });
+  assert.equal(fs.existsSync(walkthroughMarkdownPath(root)), false);
   assert.equal(readWalkthrough(root), undefined);
+});
+
+test('rendu : bloc de code robuste aux ``` du contenu, langage d’après l’extension', () => {
+  const wt: Walkthrough = {
+    title: 'T',
+    steps: [
+      {
+        id: 'step-1',
+        title: 'Doc',
+        text: 'x',
+        refs: [
+          {
+            path: 'docs/a.md',
+            start: 1,
+            end: 3,
+            snippet: '```ts\nconst a = 1;\n```',
+          },
+        ],
+        updated_at: '',
+      },
+    ],
+    created_at: '',
+    updated_at: '',
+  };
+  const md = renderWalkthrough(wt, '/proj');
+  assert.ok(md.includes('````markdown\n```ts\nconst a = 1;\n```\n````'));
+  assert.equal(languageOf('a.py'), 'python');
+  assert.equal(languageOf('Makefile'), '');
+  assert.match(
+    renderWalkthrough({ ...wt, steps: [] }, '/proj'),
+    /Aucune étape/,
+  );
 });
